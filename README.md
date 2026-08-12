@@ -24,6 +24,29 @@ npx expo start        # scan the QR code with Expo Go
 npx expo start --web  # or run it in the browser
 ```
 
+## Build from your phone with Expo (EAS)
+
+You don't need a computer — Expo's cloud build service (EAS Build) can build
+this app straight from GitHub:
+
+1. Sign in at [expo.dev](https://expo.dev) (create a free account if needed).
+2. Create a project: **Projects → Create a project**, name it
+   `eclipse-lookout`.
+3. Open the project → **Settings → GitHub**, connect your GitHub account and
+   link the `futureCast` repository.
+4. From the project's **Builds** page choose **Build from GitHub**, pick the
+   branch, the platform (Android or iOS) and the `preview` profile.
+   - **Android** `preview` builds produce an APK you can download and install
+     directly on your phone from the build page.
+   - **iOS** builds require an Apple Developer account; EAS walks you through
+     the credentials and you can submit to TestFlight/App Store with
+     **EAS Submit**.
+5. Build profiles live in [`eas.json`](eas.json) — `preview` for
+   install-on-device testing, `production` for store submissions.
+
+For instant testing without any build, install **Expo Go** on your phone and
+run `npx expo start` from the repo on any machine.
+
 ## Project layout
 
 - `App.js` — UI (location picker, results, sky simulation)
