@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
   PanResponder,
@@ -6,6 +6,7 @@ import {
   Pressable,
   SafeAreaView,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -15,8 +16,11 @@ import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
 import { computeLocalCircumstances, diskGeometry } from './src/eclipse';
 import { CITIES } from './src/cities';
+import { phaseInfo } from './src/phase';
+import { scheduleEclipseReminders } from './src/reminders';
 import EclipseDisk from './src/EclipseDisk';
 import SkyFinder from './src/SkyFinder';
+import PhotoTips from './src/PhotoTips';
 
 const COLORS = {
   bg: '#0b1023',
@@ -99,6 +103,13 @@ export default function App() {
   const [locError, setLocError] = useState(null);
   const [scrub, setScrub] = useState(0.5); // 0..1 across the partial phase
   const [arOpen, setArOpen] = useState(false);
+  const [now, setNow] = useState(new Date());
+  const [reminderStatus, setReminderStatus] = useState(null);
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   const result = useMemo(
     () => (place ? computeLocalCircumstances(place.lat, place.lon) : null),
@@ -151,6 +162,46 @@ export default function App() {
     if (!q) return CITIES;
     return CITIES.filter((c) => c.name.toLowerCase().includes(q));
   }, [query]);
+
+  const livePhase = useMemo(
+    () => (result && result.visible ? phaseInfo(result, now) : null),
+    [result, now]
+  );
+
+  async function shareTimes() {
+    if (!result || !result.visible || !place) return;
+    const t = (d) =>
+      d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const lines = [
+      `☀️🌑 Solar eclipse on Aug 12, 2026 — ${place.name}`,
+      result.isTotal
+        ? `TOTAL eclipse! ${formatDuration(
+            result.total.durationSeconds
+          )} of totality.`
+        : `Partial eclipse, ${Math.round(
+            result.obscuration * 100
+          )}% of the Sun covered.`,
+      `Starts ${t(result.partialStart)}`,
+      ...(result.isTotal
+        ? [`Totality ${t(result.total.start)}–${t(result.total.end)}`]
+        : []),
+      `Maximum ${t(result.maximum)} · Ends ${t(result.partialEnd)}`,
+      '(times in my local timezone — computed with Eclipse Lookout)',
+    ];
+    try {
+      await Share.share({ message: lines.join('\n') });
+    } catch (e) {
+      // user cancelled — nothing to do
+    }
+  }
+
+  async function addReminders() {
+    setReminderStatus('working');
+    const res = await scheduleEclipseReminders(result);
+    setReminderStatus(
+      res.error ? res.error : `✅ ${res.scheduled} reminders set on this phone.`
+    );
+  }
 
   const badge =
     result && result.visible
@@ -278,6 +329,15 @@ export default function App() {
                   the path would give you the full show.
                 </Text>
               )}
+              {livePhase && (
+                <View style={styles.liveBox}>
+                  <Text style={styles.liveText}>
+                    {livePhase.live ? '🔴 ' : '⏳ '}
+                    {livePhase.label} · {formatTime(livePhase.at)}
+                  </Text>
+                  <Text style={styles.liveNote}>{livePhase.note}</Text>
+                </View>
+              )}
               {result.sunAltitudeAtMax < 0 ? (
                 <Text style={styles.warnNote}>
                   ⚠️ The Sun will be below the horizon at maximum eclipse here —
@@ -350,6 +410,62 @@ export default function App() {
                 date={null}
                 sub={`${result.sunAltitudeAtMax.toFixed(1)}° above horizon`}
               />
+              <Pressable
+                style={({ pressed }) => [
+                  styles.btn,
+                  { marginTop: 10 },
+                  pressed && styles.btnPressed,
+                ]}
+                onPress={shareTimes}
+              >
+                <Text style={styles.btnText}>📤 Share these times</Text>
+              </Pressable>
+            </View>
+
+            {/* Reminders */}
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>🔔 Don't miss it</Text>
+              <Text style={styles.introText}>
+                Get notified on this phone before each phase: 30 and 5 minutes
+                before the eclipse starts, and a heads-up before{' '}
+                {result.isTotal ? 'totality' : 'maximum'}.
+              </Text>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.btn,
+                  { marginTop: 12 },
+                  pressed && styles.btnPressed,
+                ]}
+                onPress={addReminders}
+                disabled={reminderStatus === 'working'}
+              >
+                <Text style={styles.btnText}>
+                  {reminderStatus === 'working'
+                    ? 'Scheduling…'
+                    : '⏰ Remind me'}
+                </Text>
+              </Pressable>
+              {reminderStatus && reminderStatus !== 'working' && (
+                <Text
+                  style={
+                    reminderStatus.startsWith('✅')
+                      ? styles.reminderOk
+                      : styles.errorText
+                  }
+                >
+                  {reminderStatus}
+                </Text>
+              )}
+            </View>
+
+            {/* Photography */}
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>📸 Best camera settings</Text>
+              <Text style={styles.introText}>
+                How to actually get a good shot — with a phone or a real
+                camera, phase by phase.
+              </Text>
+              <PhotoTips />
             </View>
 
             {/* Safety */}
@@ -484,6 +600,17 @@ const styles = StyleSheet.create({
   statValue: { color: COLORS.text, fontSize: 26, fontWeight: '800' },
   statLabel: { color: COLORS.textDim, fontSize: 13, marginTop: 2 },
   totalNote: { color: COLORS.good, marginTop: 14, fontSize: 15, lineHeight: 21 },
+  liveBox: {
+    marginTop: 14,
+    backgroundColor: COLORS.cardAlt,
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: COLORS.line,
+  },
+  liveText: { color: COLORS.text, fontSize: 15, fontWeight: '800' },
+  liveNote: { color: COLORS.accent, fontSize: 13, marginTop: 3, fontWeight: '600' },
+  reminderOk: { color: COLORS.good, marginTop: 10, fontSize: 14 },
   almostNote: { color: COLORS.accent, marginTop: 14, fontSize: 15, lineHeight: 21 },
   warnNote: { color: COLORS.warn, marginTop: 12, fontSize: 14, lineHeight: 20 },
   diskWrap: { alignItems: 'center' },

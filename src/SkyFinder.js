@@ -11,6 +11,7 @@ import { DeviceMotion } from 'expo-sensors';
 import * as Location from 'expo-location';
 import { sunPosition, compassPoint, angleDelta } from './solar';
 import { dateToT, diskGeometry } from './eclipse';
+import { phaseInfo } from './phase';
 import EclipseDisk from './EclipseDisk';
 
 // Rough camera field of view used to map angle offsets to screen positions.
@@ -21,58 +22,6 @@ const ALIGN_ALT = 30;
 
 function fmt(date) {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
-function countdown(ms) {
-  if (ms <= 0) return null;
-  const h = Math.floor(ms / 3600000);
-  const m = Math.floor((ms % 3600000) / 60000);
-  const s = Math.floor((ms % 60000) / 1000);
-  if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
-}
-
-// Live phase status for the timeline bar.
-function phaseInfo(result, now) {
-  if (!result || !result.visible) return null;
-  const t = now.getTime();
-  if (t < result.partialStart.getTime()) {
-    return {
-      label: 'Partial eclipse begins',
-      at: result.partialStart,
-      note: `starts in ${countdown(result.partialStart.getTime() - t)}`,
-    };
-  }
-  if (result.isTotal && t < result.total.start.getTime()) {
-    return {
-      label: 'TOTALITY begins',
-      at: result.total.start,
-      note: `in ${countdown(result.total.start.getTime() - t)}`,
-    };
-  }
-  if (result.isTotal && t < result.total.end.getTime()) {
-    return {
-      label: 'TOTALITY NOW',
-      at: result.total.end,
-      note: `ends in ${countdown(result.total.end.getTime() - t)}`,
-    };
-  }
-  if (t < result.maximum.getTime()) {
-    return {
-      label: 'Maximum eclipse',
-      at: result.maximum,
-      note: `in ${countdown(result.maximum.getTime() - t)}`,
-    };
-  }
-  if (t < result.partialEnd.getTime()) {
-    return {
-      label: 'Partial eclipse ends',
-      at: result.partialEnd,
-      note: `in ${countdown(result.partialEnd.getTime() - t)}`,
-    };
-  }
-  return { label: 'Eclipse is over here', at: result.partialEnd, note: 'see you in 2027' };
 }
 
 export default function SkyFinder({ place, result, onClose }) {
