@@ -2,6 +2,7 @@
   "expo": {
     "name": "Eclipse Lookout",
     "slug": "eclipse-lookout",
+    "owner": "rebecca0021",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
@@ -22,6 +23,11 @@
     },
     "web": {
       "bundler": "metro"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "fdbaffe8-c655-46ff-9262-6e1170a73c4b"
+      }
     }
   }
 }
