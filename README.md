@@ -13,6 +13,9 @@ on-device from the NASA/Espenak Besselian elements for this eclipse:
 - the **duration of totality** inside the path
 - the Sun's altitude, with warnings when the eclipse happens near sunset
 - an interactive **sky simulation** you can scrub through the whole eclipse
+- an **AR sky finder**: point your phone at the sky and follow the
+  turn-left/right and tilt arrows to the exact spot where the eclipse
+  happens, with the eclipsing Sun and Moon rendered live over the camera
 
 No servers, no accounts — nothing leaves your device.
 

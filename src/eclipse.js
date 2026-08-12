@@ -136,6 +136,11 @@ export function tToDate(t) {
   return new Date(ms);
 }
 
+// Inverse of tToDate: JS Date -> hours from t0 on the TDT scale.
+export function dateToT(date) {
+  return (date.getTime() - tToDate(0).getTime()) / 3600000;
+}
+
 // Moon centre offset relative to Sun centre in sun-radius units, plus sizes,
 // for drawing the simulation at time t.
 export function diskGeometry(t, lat, lon, height = 0) {
