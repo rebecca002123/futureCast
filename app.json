@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "Eclipse Lookout",
+    "slug": "eclipse-lookout",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0b1023",
+    "splash": {
+      "backgroundColor": "#0b1023"
+    },
+    "ios": {
+      "bundleIdentifier": "com.eclipselookout.app",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Your location is used only to compute how the August 12, 2026 solar eclipse will look from where you are. It never leaves your device."
+      }
+    },
+    "android": {
+      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"],
+      "package": "com.eclipselookout.app"
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}
