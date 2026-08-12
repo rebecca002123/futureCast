@@ -14,11 +14,13 @@
       "bundleIdentifier": "com.eclipselookout.app",
       "supportsTablet": true,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Your location is used only to compute how the August 12, 2026 solar eclipse will look from where you are. It never leaves your device."
+        "NSLocationWhenInUseUsageDescription": "Your location is used only to compute how the August 12, 2026 solar eclipse will look from where you are. It never leaves your device.",
+        "NSCameraUsageDescription": "The camera is shown behind the AR sky view so the app can point you to where the eclipse is happening. No photos are taken or stored.",
+        "NSMotionUsageDescription": "Device motion is used to detect where your phone is pointing in the AR sky view."
       }
     },
     "android": {
-      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"],
+      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION", "CAMERA"],
       "package": "com.eclipselookout.app"
     },
     "web": {

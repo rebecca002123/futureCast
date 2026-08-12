@@ -15,6 +15,8 @@ import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
 import { computeLocalCircumstances, diskGeometry } from './src/eclipse';
 import { CITIES } from './src/cities';
+import EclipseDisk from './src/EclipseDisk';
+import SkyFinder from './src/SkyFinder';
 
 const COLORS = {
   bg: '#0b1023',
@@ -47,86 +49,6 @@ function formatDuration(seconds) {
   const m = Math.floor(seconds / 60);
   const s = Math.round(seconds % 60);
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
-}
-
-// ---------------------------------------------------------------------------
-// Eclipse disk simulation: the Sun with the Moon's disk drawn over it at the
-// geometry for time t, as seen from the chosen location.
-// ---------------------------------------------------------------------------
-function EclipseDisk({ geometry, size }) {
-  const sunR = size * 0.28;
-  const moonR = sunR * geometry.moonSize;
-  const cx = size / 2;
-  const cy = size / 2;
-  const mx = cx + geometry.dirX * geometry.sep * sunR;
-  const my = cy + geometry.dirY * geometry.sep * sunR;
-  const covered = geometry.obscuration;
-  const glow = 1 - covered * 0.85;
-
-  return (
-    <View style={[styles.skyBox, { width: size, height: size }]}>
-      {/* Sky darkens as the eclipse deepens */}
-      <View
-        style={[
-          StyleSheet.absoluteFill,
-          {
-            backgroundColor: `rgb(${Math.round(18 + 60 * glow)}, ${Math.round(
-              22 + 90 * glow
-            )}, ${Math.round(48 + 140 * glow)})`,
-            borderRadius: 18,
-          },
-        ]}
-      />
-      {/* Corona glow, visible near totality */}
-      <View
-        style={{
-          position: 'absolute',
-          left: cx - sunR * 1.5,
-          top: cy - sunR * 1.5,
-          width: sunR * 3,
-          height: sunR * 3,
-          borderRadius: sunR * 1.5,
-          backgroundColor: covered > 0.995 ? 'rgba(220,230,255,0.25)' : 'transparent',
-        }}
-      />
-      {/* Sun */}
-      <View
-        style={{
-          position: 'absolute',
-          left: cx - sunR,
-          top: cy - sunR,
-          width: sunR * 2,
-          height: sunR * 2,
-          borderRadius: sunR,
-          backgroundColor: covered > 0.995 ? '#f3f5ff' : COLORS.accent,
-          shadowColor: COLORS.accent,
-          shadowOpacity: glow,
-          shadowRadius: 24,
-          shadowOffset: { width: 0, height: 0 },
-        }}
-      />
-      {/* Moon */}
-      <View
-        style={{
-          position: 'absolute',
-          left: mx - moonR,
-          top: my - moonR,
-          width: moonR * 2,
-          height: moonR * 2,
-          borderRadius: moonR,
-          backgroundColor: '#0e1220',
-        }}
-      />
-      <View style={styles.diskLabelBox}>
-        <Text style={styles.diskLabel}>
-          {(covered * 100).toFixed(covered > 0.99 && covered < 1 ? 1 : 0)}% covered
-        </Text>
-        {geometry.sunAltitude < 0 && (
-          <Text style={styles.diskWarn}>Sun below the horizon</Text>
-        )}
-      </View>
-    </View>
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -176,6 +98,7 @@ export default function App() {
   const [locBusy, setLocBusy] = useState(false);
   const [locError, setLocError] = useState(null);
   const [scrub, setScrub] = useState(0.5); // 0..1 across the partial phase
+  const [arOpen, setArOpen] = useState(false);
 
   const result = useMemo(
     () => (place ? computeLocalCircumstances(place.lat, place.lon) : null),
@@ -371,6 +294,26 @@ export default function App() {
               )}
             </View>
 
+            {/* AR sky finder */}
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>🔭 Find it in the sky</Text>
+              <Text style={styles.introText}>
+                Point your phone at the sky and follow the arrows — the app
+                guides you to the exact spot where the eclipse happens and
+                shows the Sun and Moon there, live.
+              </Text>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.btn,
+                  styles.arBtn,
+                  pressed && styles.btnPressed,
+                ]}
+                onPress={() => setArOpen(true)}
+              >
+                <Text style={styles.arBtnText}>Open sky view (AR)</Text>
+              </Pressable>
+            </View>
+
             {/* Simulation */}
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Sky simulation</Text>
@@ -427,6 +370,17 @@ export default function App() {
           elements for this eclipse. No data leaves your phone.
         </Text>
       </ScrollView>
+
+      {/* AR sky finder */}
+      <Modal visible={arOpen} animationType="fade">
+        {place && result && (
+          <SkyFinder
+            place={place}
+            result={result}
+            onClose={() => setArOpen(false)}
+          />
+        )}
+      </Modal>
 
       {/* City picker */}
       <Modal visible={pickerOpen} animationType="slide" transparent>
@@ -533,10 +487,13 @@ const styles = StyleSheet.create({
   almostNote: { color: COLORS.accent, marginTop: 14, fontSize: 15, lineHeight: 21 },
   warnNote: { color: COLORS.warn, marginTop: 12, fontSize: 14, lineHeight: 20 },
   diskWrap: { alignItems: 'center' },
-  skyBox: { borderRadius: 18, overflow: 'hidden' },
-  diskLabelBox: { position: 'absolute', bottom: 10, left: 0, right: 0, alignItems: 'center' },
-  diskLabel: { color: COLORS.text, fontWeight: '700', fontSize: 15 },
-  diskWarn: { color: COLORS.warn, fontSize: 12, marginTop: 2 },
+  arBtn: {
+    marginTop: 14,
+    backgroundColor: COLORS.accent,
+    borderColor: COLORS.accent,
+    alignSelf: 'flex-start',
+  },
+  arBtnText: { color: '#1a1206', fontWeight: '800', fontSize: 15 },
   scrubTime: {
     color: COLORS.textDim,
     textAlign: 'center',
