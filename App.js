@@ -33,6 +33,7 @@ import {
 } from './src/vault';
 import { loadVault, saveVault, clearVault } from './src/storage';
 import { planReminders } from './src/notify';
+import { pushWidgetData } from './src/widget';
 import Snow from './src/Snow';
 
 const C = {
@@ -246,6 +247,7 @@ export default function App() {
     if (vault) {
       saveVault(vault);
       planReminders(vault);
+      pushWidgetData(vault);
     }
   }, [vault]);
 

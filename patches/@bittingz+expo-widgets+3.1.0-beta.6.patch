@@ -1,0 +1,124 @@
+diff --git a/node_modules/@bittingz/expo-widgets/ios/ExpoWidgetsModule.swift b/node_modules/@bittingz/expo-widgets/ios/ExpoWidgetsModule.swift
+index cec994d..bff487d 100644
+--- a/node_modules/@bittingz/expo-widgets/ios/ExpoWidgetsModule.swift
++++ b/node_modules/@bittingz/expo-widgets/ios/ExpoWidgetsModule.swift
+@@ -1,32 +1,19 @@
+ import ExpoModulesCore
+-import ActivityKit
+ import WidgetKit
+ 
+-struct SetDataProps: Record {
+-  @Field
+-  var message: String
+-}
+-
+-// the module is the message handler between your app and the widget
+-// you MUST declare the name of the module and then write whatever functions
+-// you wish your app to send over
++// Bridge between the app's JS and the home-screen widget: JS sends a JSON
++// snapshot of the lockbox, we park it in the shared app-group defaults and
++// poke WidgetKit to redraw.
+ public class ExpoWidgetsModule: Module {
+     public func definition() -> ModuleDefinition {
+         Name("ExpoWidgets")
+ 
+         Function("setWidgetData") { (data: String) -> Void in
+-            let logger = Logger(logHandlers: [MyLogHandler()])     
+-            // here we are using UserDefaults to send data to the widget
+-            // you MUST use a suite name of the format group.{your project bundle id}.expowidgets
+-            let widgetSuite = UserDefaults(suiteName: "group.expo.modules.widgets.example.expowidgets")
+-            widgetSuite?.set(data, forKey: "MyData")
+-            logger.log(message: "Encoded data saved to suite group.expo.modules.widgets.example.expowidgets, key MyData")
+-            logger.log(message: data)
++            let widgetSuite = UserDefaults(suiteName: "group.com.eclipselookout.app.expowidgets")
++            widgetSuite?.set(data, forKey: "LockboxData")
+ 
+-            // this is optional, but while your app is open and in focus
+-            // messages sent to the widget do not count towards its timeline limitations
+             if #available(iOS 14.0, *) {
+-               WidgetCenter.shared.reloadAllTimelines()
++                WidgetCenter.shared.reloadAllTimelines()
+             }
+         }
+     }
+diff --git a/node_modules/@bittingz/expo-widgets/plugin/build/ios/withPodfile.js b/node_modules/@bittingz/expo-widgets/plugin/build/ios/withPodfile.js
+index e39bf98..8fa3c06 100644
+--- a/node_modules/@bittingz/expo-widgets/plugin/build/ios/withPodfile.js
++++ b/node_modules/@bittingz/expo-widgets/plugin/build/ios/withPodfile.js
+@@ -62,16 +62,24 @@ target '${targetName}' do
+   )
+ end
+ `;
+-    const withAppExtFix = (0, generateCode_1.mergeContents)({
+-        tag: "app_ext_fix",
+-        src: podFileContent,
+-        newSrc: `
++    let withAppExtFix;
++    try {
++        withAppExtFix = (0, generateCode_1.mergeContents)({
++            tag: "app_ext_fix",
++            src: podFileContent,
++            newSrc: `
+         config.build_settings['APPLICATION_EXTENSION_API_ONLY'] = resource_bundle_target.name == 'Sentry' ? 'YES' : 'No'
+         `,
+-        anchor: /resource_bundle_target.build_configurations.each do \|config\|/,
+-        offset: 1,
+-        comment: "#",
+-    });
++            anchor: /resource_bundle_target.build_configurations.each do \|config\|/,
++            offset: 1,
++            comment: "#",
++        });
++    }
++    catch (e) {
++        // SDK 54+ Podfiles no longer contain the resource_bundle_target block
++        // this fix targets; skip it rather than failing prebuild.
++        withAppExtFix = { contents: podFileContent };
++    }
+     const withAppExtFixPt2 = (0, generateCode_1.mergeContents)({
+         tag: 'fix2',
+         src: withAppExtFix.contents,
+diff --git a/node_modules/@bittingz/expo-widgets/plugin/build/ios/xcode/addWidgetExtensionTarget.js b/node_modules/@bittingz/expo-widgets/plugin/build/ios/xcode/addWidgetExtensionTarget.js
+index ddf0943..f6cddce 100644
+--- a/node_modules/@bittingz/expo-widgets/plugin/build/ios/xcode/addWidgetExtensionTarget.js
++++ b/node_modules/@bittingz/expo-widgets/plugin/build/ios/xcode/addWidgetExtensionTarget.js
+@@ -117,8 +117,12 @@ const addWidgetExtensionTarget = (project, config, options, name, bundleId) => {
+     };
+     // Target: Add to PBXNativeTarget section
+     project.addToPbxNativeTargetSection(target);
+-    project.addTargetAttribute('DevelopmentTeam', options.devTeamId, target);
+-    project.addTargetAttribute('DevelopmentTeam', options.devTeamId);
++    // An empty devTeamId serializes as `DevelopmentTeam = ;`, corrupting the
++    // pbxproj. Only write the attribute when a team id was actually provided.
++    if (options.devTeamId) {
++        project.addTargetAttribute('DevelopmentTeam', options.devTeamId, target);
++        project.addTargetAttribute('DevelopmentTeam', options.devTeamId);
++    }
+     // This has 'Copy Files' hardcoded. instead adjust to groupName
+     //project.addToPbxCopyfilesBuildPhase(productFile)
+     logger_1.Logging.logger.debug(`Adding PBXCopyFilesBuildPhase`);
+diff --git a/node_modules/@bittingz/expo-widgets/plugin/build/ios/xcode/buildConfiguration.js b/node_modules/@bittingz/expo-widgets/plugin/build/ios/xcode/buildConfiguration.js
+index 2c94f2a..f960292 100644
+--- a/node_modules/@bittingz/expo-widgets/plugin/build/ios/xcode/buildConfiguration.js
++++ b/node_modules/@bittingz/expo-widgets/plugin/build/ios/xcode/buildConfiguration.js
+@@ -10,7 +10,7 @@ const getDefaultBuildConfigurationSettings = (options, config) => {
+     const bundleIdentifier = (0, withWidgetXCode_1.getBundleIdentifier)(config, options);
+     const currentProjectVersion = config.ios?.buildNumber || '1';
+     const marketingVersion = config.version || '1.0';
+-    return {
++    const settings = {
+         ALWAYS_SEARCH_USER_PATHS: 'NO',
+         ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: 'YES',
+         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: "AccentColor",
+@@ -47,5 +47,11 @@ const getDefaultBuildConfigurationSettings = (options, config) => {
+         TARGETED_DEVICE_FAMILY: '"1,2"',
+         ...(options.xcode?.configOverrides || {}),
+     };
++    // An empty team id serializes as `DEVELOPMENT_TEAM = ;`, which corrupts
++    // the pbxproj. Omit it and let EAS apply signing credentials instead.
++    if (!developmentTeamId) {
++        delete settings.DEVELOPMENT_TEAM;
++    }
++    return settings;
+ };
+ exports.getDefaultBuildConfigurationSettings = getDefaultBuildConfigurationSettings;

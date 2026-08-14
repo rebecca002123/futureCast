@@ -20,6 +20,22 @@
     "web": {
       "bundler": "metro"
     },
+    "plugins": [
+      [
+        "@bittingz/expo-widgets",
+        {
+          "ios": {
+            "src": "./widgets/ios",
+            "mode": "production",
+            "deploymentTarget": "17.0",
+            "devTeamId": "",
+            "useLiveActivities": false,
+            "frequentUpdates": false,
+            "moduleDependencies": []
+          }
+        }
+      ]
+    ],
     "runtimeVersion": {
       "policy": "sdkVersion"
     },
