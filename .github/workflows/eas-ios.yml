@@ -65,6 +65,7 @@ jobs:
           EXPO_ASC_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
           EXPO_ASC_KEY_ID: S8S35G9V9P
           EXPO_ASC_ISSUER_ID: a46fef41-47d8-4b28-b684-f0aa9e7d9ddc
+          EXPO_APPLE_TEAM_ID: CAL7726R3Q
           EAS_COMMAND: ${{ steps.cmd.outputs.command }}
           EAS_BUILD_NO_EXPO_GO_WARNING: "true"
         run: |
