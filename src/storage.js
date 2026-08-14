@@ -4,14 +4,20 @@ const SETTINGS_KEY = 'wildfire.settings.v1';
 const ALERTED_KEY = 'wildfire.alerted.v1';
 
 export const DEFAULT_SETTINGS = {
-  radiusKm: 50,
+  radiusMiles: 30,
   notificationsEnabled: true,
 };
 
 export async function loadSettings() {
   try {
     const raw = await AsyncStorage.getItem(SETTINGS_KEY);
-    return raw ? { ...DEFAULT_SETTINGS, ...JSON.parse(raw) } : { ...DEFAULT_SETTINGS };
+    const stored = raw ? JSON.parse(raw) : {};
+    // Migrate from the km-based setting of v1.0.
+    if (stored.radiusKm && !stored.radiusMiles) {
+      stored.radiusMiles = Math.round(stored.radiusKm * 0.621371);
+      delete stored.radiusKm;
+    }
+    return { ...DEFAULT_SETTINGS, ...stored };
   } catch {
     return { ...DEFAULT_SETTINGS };
   }

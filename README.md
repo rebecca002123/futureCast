@@ -14,12 +14,14 @@ with [Expo](https://expo.dev) / React Native and real satellite data.
   detections, confidence and fire intensity (FRP in megawatts).
 - **Nearby warnings** — with location enabled, the app warns you (banner,
   pop-up and notification) when a fire is detected inside your chosen alert
-  radius (10/25/50/100 km). Each incident only alerts once per day.
+  radius (5/15/30/60 miles). Notification permission is requested at startup;
+  each incident only alerts once per day.
 - **Fire weather** — live conditions at your location from Open-Meteo
   (temperature, humidity, wind, days since rain) rolled into an indicative
   fire-conditions rating.
-- **Fresh data** — refreshes automatically every 10 minutes while open, when
-  the app returns to the foreground, and on pull-to-refresh.
+- **Fresh data** — refreshes automatically every 5 minutes while open, every
+  time the app returns to the foreground, and on pull-to-refresh. Distances
+  are shown in miles.
 
 ## Data sources & accuracy
 

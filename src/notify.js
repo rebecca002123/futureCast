@@ -35,14 +35,14 @@ export async function setupAndroidChannel() {
   }
 }
 
-export async function sendNearbyFireNotification(distanceKm, placeName) {
+export async function sendNearbyFireNotification(distanceMiles, placeName) {
   try {
     const where = placeName ? ` near ${placeName}` : '';
     await Notifications.scheduleNotificationAsync({
       content: {
         title: '🔥 Wildfire detected nearby',
         body:
-          `Satellite has detected a fire${where}, about ${Math.round(distanceKm)} km from you. ` +
+          `Satellite has detected a fire${where}, about ${Math.round(distanceMiles)} miles from you. ` +
           'Open the app for details. If you see fire or smoke, call 999.',
         sound: true,
         ...(Platform.OS === 'android' ? { channelId: 'wildfire-alerts' } : null),
