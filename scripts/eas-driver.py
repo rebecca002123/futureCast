@@ -22,6 +22,12 @@ COMMANDS = {
 QUIET_SECONDS = 25
 
 def main():
+    # eas-cli forces non-interactive mode when CI is set (GitHub runners
+    # always set it), which forbids creating credentials. Our pty makes the
+    # session genuinely interactive, so drop the CI markers.
+    os.environ.pop("CI", None)
+    os.environ.pop("GITHUB_ACTIONS", None)
+
     command = COMMANDS[os.environ.get("EAS_COMMAND", "build")]
     print(f"::: running: {command}", flush=True)
 
@@ -68,7 +74,7 @@ def main():
         sys.stdout.buffer.write(data)
         sys.stdout.flush()
 
-    code = proc.returncode or 0
+    code = proc.wait()
     print(f"\n::: eas exited with code {code}", flush=True)
     sys.exit(code)
 
