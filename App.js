@@ -15,7 +15,7 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
 
-import { clusterDetections, fetchDetections, haversineKm, hoursAgo, timeAgoLabel } from './src/fires';
+import { clusterDetections, fetchDetections, haversineMiles, hoursAgo, KM_PER_MILE, timeAgoLabel } from './src/fires';
 import { fetchFireWeather } from './src/weather';
 import {
   ensureNotificationPermission,
@@ -35,9 +35,9 @@ if (Platform.OS !== 'web') {
   Circle = maps.Circle;
 }
 
-const REFRESH_MS = 10 * 60 * 1000; // re-check feeds every 10 minutes while open
-const STALE_MS = 5 * 60 * 1000; // refresh on returning to foreground if older
-const RADIUS_OPTIONS = [10, 25, 50, 100];
+const REFRESH_MS = 5 * 60 * 1000; // re-check feeds every 5 minutes while open
+const STALE_MS = 2 * 60 * 1000; // refresh on returning to foreground if older
+const RADIUS_OPTIONS = [5, 15, 30, 60]; // miles
 
 const UK_REGION = {
   latitude: 54.6,
@@ -102,12 +102,12 @@ export default function App() {
   // alerted about (per-incident, expires after 24h).
   const checkProximity = useCallback(async (clustered) => {
     const pos = coordsRef.current;
-    const { radiusKm, notificationsEnabled } = settingsRef.current;
+    const { radiusMiles, notificationsEnabled } = settingsRef.current;
     if (!pos) return;
 
     const fresh = clustered
-      .map((inc) => ({ inc, dist: haversineKm(pos.latitude, pos.longitude, inc.lat, inc.lon) }))
-      .filter(({ inc, dist }) => dist <= radiusKm && !alertedRef.current[inc.id])
+      .map((inc) => ({ inc, dist: haversineMiles(pos.latitude, pos.longitude, inc.lat, inc.lon) }))
+      .filter(({ inc, dist }) => dist <= radiusMiles && !alertedRef.current[inc.id])
       .sort((a, b) => a.dist - b.dist);
     if (fresh.length === 0) return;
 
@@ -125,7 +125,7 @@ export default function App() {
       Alert.alert(
         '🔥 Wildfire detected nearby',
         `Satellite has detected an active fire${place ? ` near ${place}` : ''}, ` +
-          `about ${Math.round(nearest.dist)} km from your location.\n\n` +
+          `about ${Math.round(nearest.dist)} miles from your location.\n\n` +
           'If you can see fire or smoke, call 999 and ask for the Fire Service.',
         [{ text: 'OK', onPress: () => (popupShownRef.current = false) }]
       );
@@ -166,6 +166,9 @@ export default function App() {
       settingsRef.current = s;
       alertedRef.current = alerted;
       await setupAndroidChannel();
+      // Ask for notification permission up front so nearby-fire alerts can
+      // actually be delivered when the first one happens.
+      if (s.notificationsEnabled) ensureNotificationPermission();
 
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
@@ -214,16 +217,18 @@ export default function App() {
   const withDistance = useMemo(() => {
     const list = incidents.map((inc) => ({
       ...inc,
-      distanceKm: coords ? haversineKm(coords.latitude, coords.longitude, inc.lat, inc.lon) : null,
+      distanceMiles: coords
+        ? haversineMiles(coords.latitude, coords.longitude, inc.lat, inc.lon)
+        : null,
     }));
     list.sort((a, b) => {
-      if (a.distanceKm != null && b.distanceKm != null) return a.distanceKm - b.distanceKm;
+      if (a.distanceMiles != null && b.distanceMiles != null) return a.distanceMiles - b.distanceMiles;
       return b.latestTime - a.latestTime;
     });
     return list;
   }, [incidents, coords]);
 
-  const nearest = withDistance.length && withDistance[0].distanceKm != null ? withDistance[0] : null;
+  const nearest = withDistance.length && withDistance[0].distanceMiles != null ? withDistance[0] : null;
 
   const banner = useMemo(() => {
     if (loading) return { color: '#2a3140', icon: '🛰', title: 'Checking satellites…', body: 'Fetching the latest fire detections for the UK.' };
@@ -239,33 +244,33 @@ export default function App() {
           : 'Proximity warnings will activate once your location is found.',
       };
     }
-    if (nearest && nearest.distanceKm <= settings.radiusKm) {
+    if (nearest && nearest.distanceMiles <= settings.radiusMiles) {
       return {
         color: '#8c2f23',
         icon: '🔥',
-        title: `Wildfire ${fmtDist(nearest.distanceKm)} away`,
+        title: `Wildfire ${fmtDist(nearest.distanceMiles)} away`,
         body:
           `Active fire detected ${placeNames[nearest.id] ? `near ${placeNames[nearest.id]}, ` : ''}` +
           `${timeAgoLabel(nearest.latestTime, now)}. If you see fire or smoke, call 999.`,
       };
     }
-    if (nearest && nearest.distanceKm <= settings.radiusKm * 2) {
+    if (nearest && nearest.distanceMiles <= settings.radiusMiles * 2) {
       return {
         color: '#7a5a20',
         icon: '⚠️',
-        title: `Nearest fire ${fmtDist(nearest.distanceKm)} away`,
-        body: `Outside your ${settings.radiusKm} km alert radius, but worth keeping an eye on.`,
+        title: `Nearest fire ${fmtDist(nearest.distanceMiles)} away`,
+        body: `Outside your ${settings.radiusMiles} mile alert radius, but worth keeping an eye on.`,
       };
     }
     return {
       color: '#1f4a33',
       icon: '✅',
-      title: `No wildfires within ${settings.radiusKm} km`,
+      title: `No wildfires within ${settings.radiusMiles} miles`,
       body: nearest
-        ? `Nearest UK detection is ${fmtDist(nearest.distanceKm)} away.`
+        ? `Nearest UK detection is ${fmtDist(nearest.distanceMiles)} away.`
         : 'No active fire detections in the UK in the last 24 hours.',
     };
-  }, [loading, fetchError, incidents.length, coords, locationDenied, nearest, settings.radiusKm, placeNames, now]);
+  }, [loading, fetchError, incidents.length, coords, locationDenied, nearest, settings.radiusMiles, placeNames, now]);
 
   const markerColor = (inc) => {
     const h = hoursAgo(inc.latestTime, now);
@@ -310,7 +315,7 @@ export default function App() {
               {coords && Circle && (
                 <Circle
                   center={{ latitude: coords.latitude, longitude: coords.longitude }}
-                  radius={settings.radiusKm * 1000}
+                  radius={settings.radiusMiles * KM_PER_MILE * 1000}
                   strokeColor="rgba(120,180,255,0.8)"
                   fillColor="rgba(120,180,255,0.08)"
                 />
@@ -340,7 +345,7 @@ export default function App() {
         <View style={styles.statsRow}>
           <Stat label="Active fires" value={loading ? '…' : String(incidents.length)} />
           <Stat label="Detections 24h" value={loading ? '…' : String(detectionCount)} />
-          <Stat label="Alert radius" value={`${settings.radiusKm} km`} />
+          <Stat label="Alert radius" value={`${settings.radiusMiles} mi`} />
         </View>
 
         {weather && (
@@ -380,14 +385,14 @@ export default function App() {
               <Text style={styles.fireName}>
                 {placeNames[inc.id] || `${inc.lat.toFixed(3)}, ${inc.lon.toFixed(3)}`}
               </Text>
-              {inc.distanceKm != null && (
+              {inc.distanceMiles != null && (
                 <Text
                   style={[
                     styles.fireDist,
-                    inc.distanceKm <= settings.radiusKm ? styles.fireDistNear : null,
+                    inc.distanceMiles <= settings.radiusMiles ? styles.fireDistNear : null,
                   ]}
                 >
-                  {fmtDist(inc.distanceKm)}
+                  {fmtDist(inc.distanceMiles)}
                 </Text>
               )}
             </View>
@@ -404,14 +409,14 @@ export default function App() {
         <View style={styles.card}>
           <Text style={styles.cardBody}>Warn me when a fire is detected within:</Text>
           <View style={styles.chipRow}>
-            {RADIUS_OPTIONS.map((km) => (
+            {RADIUS_OPTIONS.map((mi) => (
               <Pressable
-                key={km}
-                onPress={() => updateSettings({ radiusKm: km })}
-                style={[styles.chip, settings.radiusKm === km && styles.chipActive]}
+                key={mi}
+                onPress={() => updateSettings({ radiusMiles: mi })}
+                style={[styles.chip, settings.radiusMiles === mi && styles.chipActive]}
               >
-                <Text style={[styles.chipText, settings.radiusKm === km && styles.chipTextActive]}>
-                  {km} km
+                <Text style={[styles.chipText, settings.radiusMiles === mi && styles.chipTextActive]}>
+                  {mi} mi
                 </Text>
               </Pressable>
             ))}
@@ -424,8 +429,9 @@ export default function App() {
             <Text style={styles.toggleValue}>{settings.notificationsEnabled ? 'On 🔔' : 'Off 🔕'}</Text>
           </Pressable>
           <Text style={styles.smallNote}>
-            Alerts are checked while the app is open (and every 10 minutes in the foreground). For
-            background alerts, install the standalone build rather than Expo Go.
+            Fire data refreshes automatically every 5 minutes while the app is open, and again each
+            time you come back to it. For background alerts with the app closed, install the
+            standalone build rather than Expo Go.
           </Text>
         </View>
 
@@ -453,8 +459,8 @@ export default function App() {
   );
 }
 
-function fmtDist(km) {
-  return km < 10 ? `${km.toFixed(1)} km` : `${Math.round(km)} km`;
+function fmtDist(miles) {
+  return miles < 10 ? `${miles.toFixed(1)} mi` : `${Math.round(miles)} mi`;
 }
 
 function Stat({ label, value }) {

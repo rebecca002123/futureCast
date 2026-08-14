@@ -223,6 +223,12 @@ export function clusterDetections(detections, radiusKm = 3) {
   });
 }
 
+export const KM_PER_MILE = 1.609344;
+
+export function haversineMiles(lat1, lon1, lat2, lon2) {
+  return haversineKm(lat1, lon1, lat2, lon2) / KM_PER_MILE;
+}
+
 export function hoursAgo(date, now = new Date()) {
   return (now.getTime() - date.getTime()) / 3600000;
 }
