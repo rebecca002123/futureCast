@@ -1,26 +1,20 @@
 {
   "expo": {
-    "name": "Eclipse Lookout",
+    "name": "Christmas Lockbox",
     "slug": "eclipse-lookout",
     "owner": "rebecca0021",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
-    "backgroundColor": "#0b1023",
+    "backgroundColor": "#0a1712",
     "splash": {
-      "backgroundColor": "#0b1023"
+      "backgroundColor": "#0a1712"
     },
     "ios": {
       "bundleIdentifier": "com.eclipselookout.app",
-      "supportsTablet": true,
-      "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Your location is used only to compute how the August 12, 2026 solar eclipse will look from where you are. It never leaves your device.",
-        "NSCameraUsageDescription": "The camera is shown behind the AR sky view so the app can point you to where the eclipse is happening. No photos are taken or stored.",
-        "NSMotionUsageDescription": "Device motion is used to detect where your phone is pointing in the AR sky view."
-      }
+      "supportsTablet": true
     },
     "android": {
-      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION", "CAMERA"],
       "package": "com.eclipselookout.app"
     },
     "web": {
