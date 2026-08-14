@@ -21,6 +21,7 @@
       "bundler": "metro"
     },
     "plugins": [
+      "./plugins/withoutPush.js",
       [
         "@bittingz/expo-widgets",
         {
