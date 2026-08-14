@@ -23,6 +23,7 @@ EAS_VERSION = "21.5.0"
 COMMANDS = {
     "build": f"npx eas-cli@{EAS_VERSION} build --platform ios --profile production --no-wait",
     "submit": f"npx eas-cli@{EAS_VERSION} submit --platform ios --latest --verbose",
+    "status": f"npx eas-cli@{EAS_VERSION} build:list --platform ios --limit 1 --non-interactive --json",
 }
 
 QUIET_SECONDS = 25
