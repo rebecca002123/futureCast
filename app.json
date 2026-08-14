@@ -1,25 +1,40 @@
 {
   "expo": {
-    "name": "Christmas Lockbox",
+    "name": "UK Wildfire Watch",
     "slug": "eclipse-lookout",
     "owner": "rebecca0021",
-    "version": "2.0.0",
+    "version": "3.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
-    "backgroundColor": "#0a1712",
+    "backgroundColor": "#12161f",
     "splash": {
-      "backgroundColor": "#0a1712"
+      "backgroundColor": "#12161f"
     },
     "ios": {
       "bundleIdentifier": "com.eclipselookout.app",
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "UK Wildfire Watch uses your location to warn you when a wildfire is detected near you."
+      }
     },
     "android": {
-      "package": "com.eclipselookout.app"
+      "package": "com.eclipselookout.app",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ]
     },
     "web": {
       "bundler": "metro"
     },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "UK Wildfire Watch uses your location to warn you when a wildfire is detected near you."
+        }
+      ]
+    ],
     "runtimeVersion": {
       "policy": "sdkVersion"
     },

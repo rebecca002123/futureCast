@@ -1,60 +1,61 @@
-# Christmas Lockbox 🎄🔒
+# UK Wildfire Watch 🔥🛰
 
-Squirrel money away every month, locked where you can't touch it — then the
-box springs open every year just before Christmas so you can spend it on
-presents. Built with [Expo](https://expo.dev) / React Native.
+Live map and proximity alerts for wildfires in the UK (and Ireland), built
+with [Expo](https://expo.dev) / React Native and real satellite data.
 
 ## What it does
 
-- **Monthly auto-deposits** — pick an amount and a day of the month (payday!)
-  and the lockbox credits itself automatically every month, even catching up
-  on months where you never opened the app.
-- **Properly locked** — no withdraw button exists until December. The balance
-  just sits there growing, with a countdown to unlock day.
-- **Unlocks every year before Christmas** — on your chosen December day
-  (1st–24th) the box opens, confetti-snow intensifies, and you can spend from
-  it until the end of Boxing Day. Whatever's left rolls over to next year and
-  the box locks itself again.
-- **Goal tracking** — set a Christmas budget and watch the projected balance
-  fill the bar.
-- **Top-ups** — add extra any time (in is always allowed; out is not).
-- **Emergency unlock** — life happens: you can force it open, but only after
-  a 72-hour cooling-off wait you can cancel at any time.
-- **Reminders** — a notification on each deposit day and on the December
-  morning the box opens.
+- **Live fire detections** — pulls NASA FIRMS active-fire data from four
+  satellite sensors (VIIRS on Suomi-NPP, NOAA-20 and NOAA-21 at 375 m
+  resolution, plus MODIS at 1 km), filters to the UK/Ireland, and clusters
+  detections into fire incidents.
+- **Map + list** — every incident on a map (colour-coded by how recent the
+  detection is) and in a list with place names, distance from you, number of
+  detections, confidence and fire intensity (FRP in megawatts).
+- **Nearby warnings** — with location enabled, the app warns you (banner,
+  pop-up and notification) when a fire is detected inside your chosen alert
+  radius (10/25/50/100 km). Each incident only alerts once per day.
+- **Fire weather** — live conditions at your location from Open-Meteo
+  (temperature, humidity, wind, days since rain) rolled into an indicative
+  fire-conditions rating.
+- **Fresh data** — refreshes automatically every 10 minutes while open, when
+  the app returns to the foreground, and on pull-to-refresh.
 
-## The honest bit: how the money actually moves
+## Data sources & accuracy
 
-Apps can't reach into your bank account by themselves — only banks and
-licensed payment institutions can move your money. The lockbox is designed to
-pair with your bank:
+| Source | What | Notes |
+| --- | --- | --- |
+| [NASA FIRMS](https://firms.modaps.eosdis.nasa.gov/) | Active fire detections (keyless Europe 24 h CSV feeds) | VIIRS 375 m + MODIS 1 km; new data as satellites pass (~every 1–3 h) plus ~1–3 h processing latency |
+| [Open-Meteo](https://open-meteo.com/) | Current weather + 7-day rainfall | Free, no API key |
 
-1. Open a separate savings account (or "pot"/"space") in your banking app.
-2. Set up a **standing order** for the same amount, on the same day, into it.
-3. The lockbox mirrors that money, keeps it locked and out of sight, and
-   rings the bell in December. (The in-app "How the money moves" card walks
-   through this.)
+Honest limitations, shown in-app too:
 
-Everything is stored on your phone. No servers, no accounts, nothing leaves
-your device.
+- Satellites can **miss small, brief or smouldering fires**, and cloud cover
+  can hide detections; hot industrial sites occasionally show as false
+  positives (confidence is displayed per incident).
+- A detection means the satellite saw a hot spot in the last 24 h — the fire
+  may already be out.
+- **This is not an official warning service.** If you see fire or smoke,
+  call **999**.
+
+## Alerts in Expo Go vs a real build
+
+In Expo Go, proximity checks run while the app is open (foreground). For
+true background alerts, make a standalone build via EAS (below) — the app is
+already set up with notification channels and location permissions.
 
 ## Install and test via expo.dev (EAS)
 
-This repo is already linked to the EAS project (`rebecca0021/eclipse-lookout`
-— same project as before, the app is now Christmas Lockbox). Merging to
+This repo is linked to the EAS project `rebecca0021/eclipse-lookout` (same
+project as the previous apps — the app is now UK Wildfire Watch). Merging to
 `main` auto-publishes an update via `.eas/workflows/publish-update.yml`.
-
-To install on your phone:
 
 1. Sign in at [expo.dev](https://expo.dev) and open the project.
 2. **Builds → Build from GitHub**, pick this branch (or `main` after
-   merging), platform, and the `preview` profile.
-   - **Android**: the `preview` build makes an APK you install straight from
-     the build page.
-   - **iOS**: needs your Apple Developer account; EAS walks you through it
-     and can push to TestFlight.
-3. Because the bundle identifiers are unchanged, the new build installs right
-   over the old Eclipse Lookout app.
+   merging), platform, and the `preview` profile (Android gives an APK you
+   can install straight from the build page).
+3. Because the bundle identifiers are unchanged, the new build installs over
+   the previous app.
 
 For a quick look without building: open the project's **Updates** page on
 expo.dev after merging and scan the update's QR code with **Expo Go**.
@@ -64,16 +65,17 @@ expo.dev after merging and scan the update's QR code with **Expo Go**.
 ```bash
 npm install
 npx expo start        # scan the QR with Expo Go
-npx expo start --web  # or in the browser
 ```
+
+(The map needs a phone — the web preview shows everything except the map.)
 
 ## Project layout
 
-- `App.js` — UI (setup, vault, spending, settings)
-- `src/vault.js` — all the money/locking logic (pure functions)
-- `src/storage.js` — on-device persistence
-- `src/notify.js` — deposit-day and unlock-day reminders
-- `src/Snow.js` — the snow ❄
+- `App.js` — UI (banner, map, fire list, weather, settings)
+- `src/fires.js` — FIRMS feeds: fetch, parse, UK filter, clustering, distance
+- `src/weather.js` — Open-Meteo fire-weather fetch + indicative rating
+- `src/notify.js` — proximity notifications
+- `src/storage.js` — settings + already-alerted persistence
 
 ---
 

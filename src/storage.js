@@ -1,28 +1,51 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const KEY = 'christmas-lockbox/v1';
+const SETTINGS_KEY = 'wildfire.settings.v1';
+const ALERTED_KEY = 'wildfire.alerted.v1';
 
-export async function loadVault() {
+export const DEFAULT_SETTINGS = {
+  radiusKm: 50,
+  notificationsEnabled: true,
+};
+
+export async function loadSettings() {
   try {
-    const raw = await AsyncStorage.getItem(KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch (e) {
-    return null;
+    const raw = await AsyncStorage.getItem(SETTINGS_KEY);
+    return raw ? { ...DEFAULT_SETTINGS, ...JSON.parse(raw) } : { ...DEFAULT_SETTINGS };
+  } catch {
+    return { ...DEFAULT_SETTINGS };
   }
 }
 
-export async function saveVault(state) {
+export async function saveSettings(settings) {
   try {
-    await AsyncStorage.setItem(KEY, JSON.stringify(state));
-  } catch (e) {
-    // Persistence is best-effort; the in-memory state stays authoritative.
+    await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    // non-fatal
   }
 }
 
-export async function clearVault() {
+// Incident ids we've already notified about, so alerts don't repeat on every
+// refresh. Entries expire after 24h (matching the 24h detection window).
+export async function loadAlerted() {
   try {
-    await AsyncStorage.removeItem(KEY);
-  } catch (e) {
-    // ignore
+    const raw = await AsyncStorage.getItem(ALERTED_KEY);
+    const map = raw ? JSON.parse(raw) : {};
+    const cutoff = Date.now() - 24 * 3600000;
+    const fresh = {};
+    for (const [id, ts] of Object.entries(map)) {
+      if (ts > cutoff) fresh[id] = ts;
+    }
+    return fresh;
+  } catch {
+    return {};
+  }
+}
+
+export async function saveAlerted(map) {
+  try {
+    await AsyncStorage.setItem(ALERTED_KEY, JSON.stringify(map));
+  } catch {
+    // non-fatal
   }
 }

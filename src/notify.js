@@ -1,63 +1,55 @@
-import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
-import { nextDepositDate, windowState, fmtMoney } from './vault';
+import { Platform } from 'react-native';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowBanner: true,
     shouldShowList: true,
-    shouldPlaySound: false,
+    shouldPlaySound: true,
     shouldSetBadge: false,
   }),
 });
 
-// Re-plan the two reminders that matter: the next monthly deposit and the
-// morning the lockbox opens. Called on every app start / settings change,
-// so the schedule stays correct without needing background tasks.
-export async function planReminders(state) {
-  if (Platform.OS === 'web') return;
+export async function ensureNotificationPermission() {
   try {
-    const { status } = await Notifications.requestPermissionsAsync();
-    if (status !== 'granted') return;
+    const current = await Notifications.getPermissionsAsync();
+    if (current.granted) return true;
+    const req = await Notifications.requestPermissionsAsync();
+    return !!req.granted;
+  } catch {
+    return false;
+  }
+}
 
-    await Notifications.cancelAllScheduledNotificationsAsync();
+export async function setupAndroidChannel() {
+  if (Platform.OS !== 'android') return;
+  try {
+    await Notifications.setNotificationChannelAsync('wildfire-alerts', {
+      name: 'Wildfire proximity alerts',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 400, 200, 400],
+      lightColor: '#ff5722',
+    });
+  } catch {
+    // non-fatal
+  }
+}
 
-    const now = new Date();
-    const { symbol, monthlyMinor, unlockDay } = state.config;
-
-    const dep = nextDepositDate(state, now);
-    if (dep) {
-      const at = new Date(dep.getFullYear(), dep.getMonth(), dep.getDate(), 9, 0, 0);
-      if (at > now) {
-        await Notifications.scheduleNotificationAsync({
-          content: {
-            title: '🎁 Deposit day',
-            body: `${fmtMoney(monthlyMinor, symbol)} just went into your Christmas Lockbox. Don't peek!`,
-          },
-          trigger: { type: 'date', date: at },
-        });
-      }
-    }
-
-    const w = windowState(unlockDay, now);
-    if (!w.open) {
-      const at = new Date(
-        w.opensAt.getFullYear(),
-        w.opensAt.getMonth(),
-        w.opensAt.getDate(),
-        8, 0, 0
-      );
-      if (at > now) {
-        await Notifications.scheduleNotificationAsync({
-          content: {
-            title: '🎄 Your Christmas Lockbox is OPEN!',
-            body: 'The wait is over — your savings are unlocked. Go treat everyone.',
-          },
-          trigger: { type: 'date', date: at },
-        });
-      }
-    }
-  } catch (e) {
-    // Reminders are a nicety; never let them break the app.
+export async function sendNearbyFireNotification(distanceKm, placeName) {
+  try {
+    const where = placeName ? ` near ${placeName}` : '';
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: '🔥 Wildfire detected nearby',
+        body:
+          `Satellite has detected a fire${where}, about ${Math.round(distanceKm)} km from you. ` +
+          'Open the app for details. If you see fire or smoke, call 999.',
+        sound: true,
+        ...(Platform.OS === 'android' ? { channelId: 'wildfire-alerts' } : null),
+      },
+      trigger: null, // deliver immediately
+    });
+  } catch {
+    // Notifications can be limited in Expo Go — the in-app banner still shows.
   }
 }
