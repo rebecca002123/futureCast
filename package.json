@@ -5,12 +5,12 @@
   "scripts": {
     "postinstall": "patch-package || true",
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "web": "expo start --web"
   },
   "dependencies": {
-    "@bittingz/expo-widgets": "3.1.0-beta.6",
+    "@bittingz/expo-widgets": "^3.1.0-beta.6",
     "@expo/metro-runtime": "~6.1.2",
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "^54.0.36",
@@ -25,7 +25,7 @@
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "babel-preset-expo": "~54.0.0",
-    "fs-extra": "^11.3.3",
+    "fs-extra": "^11.4.0",
     "patch-package": "^8.0.1"
   },
   "private": true
