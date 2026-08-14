@@ -1,9 +1,9 @@
 {
   "expo": {
     "name": "Christmas Lockbox",
-    "slug": "eclipse-lookout",
+    "slug": "christmas-lockbox",
     "owner": "rebecca0021",
-    "version": "2.0.0",
+    "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0a1712",
@@ -11,11 +11,11 @@
       "backgroundColor": "#0a1712"
     },
     "ios": {
-      "bundleIdentifier": "com.eclipselookout.app",
+      "bundleIdentifier": "com.christmaslockbox.app",
       "supportsTablet": true
     },
     "android": {
-      "package": "com.eclipselookout.app"
+      "package": "com.christmaslockbox.app"
     },
     "web": {
       "bundler": "metro"
@@ -38,14 +38,6 @@
     ],
     "runtimeVersion": {
       "policy": "sdkVersion"
-    },
-    "updates": {
-      "url": "https://u.expo.dev/fdbaffe8-c655-46ff-9262-6e1170a73c4b"
-    },
-    "extra": {
-      "eas": {
-        "projectId": "fdbaffe8-c655-46ff-9262-6e1170a73c4b"
-      }
     }
   }
 }

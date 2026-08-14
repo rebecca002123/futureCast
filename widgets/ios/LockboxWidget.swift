@@ -18,7 +18,7 @@ struct LockboxEntry: TimelineEntry {
 }
 
 private func loadPayload() -> LockboxPayload? {
-    let suite = UserDefaults(suiteName: "group.com.eclipselookout.app.expowidgets")
+    let suite = UserDefaults(suiteName: "group.com.christmaslockbox.app.expowidgets")
     guard let raw = suite?.string(forKey: "LockboxData"),
           let data = raw.data(using: .utf8) else {
         return nil

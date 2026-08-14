@@ -40,24 +40,30 @@ your device.
 
 ## Install and test via expo.dev (EAS)
 
-This repo is already linked to the EAS project (`rebecca0021/eclipse-lookout`
-— same project as before, the app is now Christmas Lockbox). Merging to
-`main` auto-publishes an update via `.eas/workflows/publish-update.yml`.
+Christmas Lockbox is its **own app** (slug `christmas-lockbox`, bundle id
+`com.christmaslockbox.app`) so it can live on your phone alongside the other
+apps built from this repo. It lives on the
+`claude/christmas-savings-lockbox-8u7c9g` branch — `main` hosts a different
+app.
 
-To install on your phone:
+One-time setup:
 
-1. Sign in at [expo.dev](https://expo.dev) and open the project.
-2. **Builds → Build from GitHub**, pick this branch (or `main` after
-   merging), platform, and the `preview` profile.
-   - **Android**: the `preview` build makes an APK you install straight from
-     the build page.
-   - **iOS**: needs your Apple Developer account; EAS walks you through it
-     and can push to TestFlight.
-3. Because the bundle identifiers are unchanged, the new build installs right
-   over the old Eclipse Lookout app.
+1. Sign in at [expo.dev](https://expo.dev) → **Create a project** named
+   exactly `christmas-lockbox`.
+2. Open the project → **Settings → GitHub** and link the `futureCast`
+   repository.
+3. Copy the project's ID into `app.json` under `extra.eas.projectId`
+   (or run `eas init` locally).
 
-For a quick look without building: open the project's **Updates** page on
-expo.dev after merging and scan the update's QR code with **Expo Go**.
+Then to install: **Builds → Build from GitHub**, pick the
+`claude/christmas-savings-lockbox-8u7c9g` branch, platform, and the
+`preview` profile.
+
+- **Android**: the `preview` build makes an APK you install straight from
+  the build page.
+- **iOS**: needs your Apple Developer account (new bundle id, so EAS will
+  set up fresh provisioning) and can push to TestFlight. The home-screen
+  widget ships inside the same build.
 
 ## Run locally
 

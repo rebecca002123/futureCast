@@ -9,7 +9,7 @@ public class ExpoWidgetsModule: Module {
         Name("ExpoWidgets")
 
         Function("setWidgetData") { (data: String) -> Void in
-            let widgetSuite = UserDefaults(suiteName: "group.com.eclipselookout.app.expowidgets")
+            let widgetSuite = UserDefaults(suiteName: "group.com.christmaslockbox.app.expowidgets")
             widgetSuite?.set(data, forKey: "LockboxData")
 
             if #available(iOS 14.0, *) {
