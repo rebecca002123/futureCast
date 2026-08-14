@@ -13,15 +13,18 @@ on:
         options:
           - build
           - submit
+          - status
 
 jobs:
   eas:
     # Push-triggered runs only fire when the commit message opts in with
-    # an [eas build] or [eas submit] tag; manual dispatches always run.
+    # an [eas build], [eas submit] or [eas status] tag; manual dispatches
+    # always run.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       contains(github.event.head_commit.message, '[eas build]') ||
-      contains(github.event.head_commit.message, '[eas submit]')
+      contains(github.event.head_commit.message, '[eas submit]') ||
+      contains(github.event.head_commit.message, '[eas status]')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -55,6 +58,7 @@ jobs:
           cmd="${DISPATCH_COMMAND:-build}"
           case "$HEAD_MESSAGE" in
             *"[eas submit]"*) cmd="submit" ;;
+            *"[eas status]"*) cmd="status" ;;
             *"[eas build]"*) cmd="build" ;;
           esac
           echo "command=$cmd" >> "$GITHUB_OUTPUT"
