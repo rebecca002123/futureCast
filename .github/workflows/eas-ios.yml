@@ -1,0 +1,53 @@
+name: EAS iOS build
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "What to run"
+        type: choice
+        default: build
+        options:
+          - build
+          - submit
+
+jobs:
+  eas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/christmas-savings-lockbox-8u7c9g
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Write App Store Connect key
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          if [ -z "$ASC_KEY_P8" ]; then
+            echo "Missing ASC_KEY_P8 secret" >&2
+            exit 1
+          fi
+          printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+
+      - name: Run EAS
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_ASC_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
+          EXPO_ASC_KEY_ID: S8S35G9V9P
+          EXPO_ASC_ISSUER_ID: a46fef41-47d8-4b28-b684-f0aa9e7d9ddc
+          EAS_COMMAND: ${{ inputs.command }}
+          EAS_BUILD_NO_EXPO_GO_WARNING: "true"
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "Missing EXPO_TOKEN secret" >&2
+            exit 1
+          fi
+          python3 scripts/eas-driver.py
