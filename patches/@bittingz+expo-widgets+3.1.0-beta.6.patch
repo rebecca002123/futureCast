@@ -1,5 +1,5 @@
 diff --git a/node_modules/@bittingz/expo-widgets/ios/ExpoWidgetsModule.swift b/node_modules/@bittingz/expo-widgets/ios/ExpoWidgetsModule.swift
-index cec994d..bff487d 100644
+index cec994d..b737d5b 100644
 --- a/node_modules/@bittingz/expo-widgets/ios/ExpoWidgetsModule.swift
 +++ b/node_modules/@bittingz/expo-widgets/ios/ExpoWidgetsModule.swift
 @@ -1,32 +1,19 @@
@@ -30,7 +30,7 @@ index cec994d..bff487d 100644
 -            widgetSuite?.set(data, forKey: "MyData")
 -            logger.log(message: "Encoded data saved to suite group.expo.modules.widgets.example.expowidgets, key MyData")
 -            logger.log(message: data)
-+            let widgetSuite = UserDefaults(suiteName: "group.com.eclipselookout.app.expowidgets")
++            let widgetSuite = UserDefaults(suiteName: "group.com.christmaslockbox.app.expowidgets")
 +            widgetSuite?.set(data, forKey: "LockboxData")
  
 -            // this is optional, but while your app is open and in focus
@@ -42,17 +42,40 @@ index cec994d..bff487d 100644
          }
      }
 diff --git a/node_modules/@bittingz/expo-widgets/plugin/build/ios/withPodfile.js b/node_modules/@bittingz/expo-widgets/plugin/build/ios/withPodfile.js
-index e39bf98..8fa3c06 100644
+index e39bf98..b6fec2e 100644
 --- a/node_modules/@bittingz/expo-widgets/plugin/build/ios/withPodfile.js
 +++ b/node_modules/@bittingz/expo-widgets/plugin/build/ios/withPodfile.js
-@@ -62,16 +62,24 @@ target '${targetName}' do
-   )
- end
- `;
+@@ -45,33 +45,30 @@ const withPodfile = (config, options) => {
+     const AppExtValue = AppExtAPIOnly ? 'YES' : 'No';
+     const podFilePath = path.join(config.modRequest.platformProjectRoot, "Podfile");
+     let podFileContent = fs.readFileSync(podFilePath).toString();
+-    const podInstaller = `
+-target '${targetName}' do
+-  use_expo_modules!
+-  config = use_native_modules!
+-
+-  use_frameworks! :linkage => podfile_properties['ios.useFrameworks'].to_sym if podfile_properties['ios.useFrameworks']
+-  use_frameworks! :linkage => ENV['USE_FRAMEWORKS'].to_sym if ENV['USE_FRAMEWORKS']
+-
+-  use_react_native!(
+-    :path => config[:reactNativePath],
+-    :hermes_enabled => podfile_properties['expo.jsEngine'] == nil || podfile_properties['expo.jsEngine'] == 'hermes',
+-    # An absolute path to your application root.
+-    :app_path => "#{Pod::Config.instance.installation_root}/..",
+-    :privacy_file_aggregation_enabled => podfile_properties['apple.privacyManifestAggregationEnabled'] != 'false',
+-  )
+-end
+-`;
 -    const withAppExtFix = (0, generateCode_1.mergeContents)({
 -        tag: "app_ext_fix",
 -        src: podFileContent,
 -        newSrc: `
++    // The widget extension is pure Swift (WidgetKit/SwiftUI) and needs no
++    // pods. The upstream target block calls use_native_modules!, which
++    // requires @react-native-community/cli — no longer shipped with Expo
++    // SDK 54 — and breaks pod install. Leave the target out of the Podfile
++    // entirely so CocoaPods ignores it.
++    const podInstaller = ``;
 +    let withAppExtFix;
 +    try {
 +        withAppExtFix = (0, generateCode_1.mergeContents)({
