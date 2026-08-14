@@ -6,6 +6,10 @@ run it interactively inside a pty and press Enter (accept the default)
 whenever output goes quiet — every prompt in this flow has a sensible
 default. Apple authentication itself is non-interactive via the
 EXPO_ASC_* environment variables set by the workflow.
+
+eas-cli is pinned to 21.5.0: 22.0.0 (released 2026-08-14) breaks Apple
+capability syncing with an invalid request payload; 21.5.0 matches the
+latest-eas-build dist-tag used by EAS's own infrastructure.
 """
 import os
 import pty
@@ -14,9 +18,11 @@ import subprocess
 import sys
 import time
 
+EAS_VERSION = "21.5.0"
+
 COMMANDS = {
-    "build": "npx eas-cli@latest build --platform ios --profile production --no-wait",
-    "submit": "npx eas-cli@latest submit --platform ios --latest --verbose",
+    "build": f"npx eas-cli@{EAS_VERSION} build --platform ios --profile production --no-wait",
+    "submit": f"npx eas-cli@{EAS_VERSION} submit --platform ios --latest --verbose",
 }
 
 QUIET_SECONDS = 25
