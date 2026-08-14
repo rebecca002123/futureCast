@@ -68,6 +68,10 @@ jobs:
           EAS_COMMAND: ${{ steps.cmd.outputs.command }}
           EAS_BUILD_NO_EXPO_GO_WARNING: "true"
         run: |
+          # Pasted secrets often carry stray whitespace/newlines that make
+          # an illegal Authorization header — strip them.
+          EXPO_TOKEN="$(printf '%s' "$EXPO_TOKEN" | tr -d '[:space:]')"
+          export EXPO_TOKEN
           if [ -z "$EXPO_TOKEN" ]; then
             echo "Missing EXPO_TOKEN secret" >&2
             exit 1
