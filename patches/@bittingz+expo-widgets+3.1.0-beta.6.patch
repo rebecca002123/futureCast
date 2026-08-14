@@ -145,3 +145,20 @@ index 2c94f2a..f960292 100644
 +    return settings;
  };
  exports.getDefaultBuildConfigurationSettings = getDefaultBuildConfigurationSettings;
+diff --git a/node_modules/@bittingz/expo-widgets/plugin/build/ios/xcode/withEntitlements.js b/node_modules/@bittingz/expo-widgets/plugin/build/ios/xcode/withEntitlements.js
+index e5ef451..d8df312 100644
+--- a/node_modules/@bittingz/expo-widgets/plugin/build/ios/xcode/withEntitlements.js
++++ b/node_modules/@bittingz/expo-widgets/plugin/build/ios/xcode/withEntitlements.js
+@@ -45,9 +45,11 @@ const fs = __importStar(require("fs"));
+ const plist = __importStar(require("plist"));
+ const target_1 = require("./target");
+ const createEntitlementXML = (appGroupId, mode, entitlements) => {
++    // Widget extensions never receive push notifications; shipping an
++    // aps-environment entitlement forces the Push Notifications capability
++    // onto the widget's provisioning profile for no reason.
+     const finalEntitlements = {
+         ...entitlements || {},
+-        'aps-environment': mode,
+         'com.apple.security.application-groups': [appGroupId],
+     };
+     return plist.build(finalEntitlements);
