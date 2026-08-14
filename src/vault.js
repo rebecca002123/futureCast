@@ -44,6 +44,8 @@ export function newVault(config, now = new Date()) {
     // chosen deposit day the first deposit is credited immediately.
     lastAccrualMs: startOfDay(now).getTime() - 1,
     emergency: null, // { requestedMs, open }
+    // Set once the user confirms the real standing order exists at the bank.
+    bankConfirmed: false,
   };
 }
 

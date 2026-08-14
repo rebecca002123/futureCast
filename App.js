@@ -349,6 +349,47 @@ export default function App() {
           )}
         </View>
 
+        {/* ---------------- Bank link status ---------------- */}
+        {vault.bankConfirmed ? (
+          <View style={styles.cardRow}>
+            <View style={styles.rowLeft}>
+              <Text style={styles.rowTitle}>Bank</Text>
+              <Text style={styles.rowSub}>
+                Standing order active — your bank moves the money ✓
+              </Text>
+            </View>
+            <Text style={styles.rowBig}>🏦</Text>
+          </View>
+        ) : (
+          <View style={[styles.card, styles.cardWarn]}>
+            <Text style={styles.sectionTitle}>Make it real 🏦</Text>
+            <Text style={styles.howText}>
+              Right now the box is only keeping score. Your bank does the
+              actual money-moving: set up a standing order of{' '}
+              {fmtMoney(monthlyMinor, symbol)} on the {ordinal(vault.config.depositDay)}{' '}
+              of each month into a savings account you never look at — a
+              one-time, two-minute job in your banking app.
+            </Text>
+            <View style={styles.btnRow}>
+              <Pressable style={styles.smallBtnAlt} onPress={() => setShowHow(true)}>
+                <Text style={styles.smallBtnAltText}>Show me how</Text>
+              </Pressable>
+              <Pressable
+                style={styles.smallBtn}
+                onPress={() =>
+                  confirm(
+                    'Standing order set up?',
+                    'Confirm your bank is now sending the money automatically each month.',
+                    () => update((v) => ({ ...v, bankConfirmed: true }))
+                  )
+                }
+              >
+                <Text style={styles.smallBtnText}>Done — it's live ✓</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
+
         {/* ---------------- Next deposit ---------------- */}
         {nextDep && (
           <View style={styles.cardRow}>
@@ -550,8 +591,9 @@ function HowModal({ visible, vault, onClose }) {
             time. Out of sight, out of spend.
           </Text>
           <Text style={styles.howText}>
-            Bonus: park the savings account somewhere with interest and the
-            elves pay you for waiting.
+            Make it properly untouchable: use a notice account, a fixed-term
+            saver, or a bank whose app you don't keep on your phone. Bonus:
+            pick one that pays interest and the elves pay you for waiting.
           </Text>
           <Pressable style={styles.bigBtn} onPress={onClose}>
             <Text style={styles.bigBtnText}>Got it</Text>
@@ -766,6 +808,7 @@ const styles = StyleSheet.create({
 
   card: { backgroundColor: C.card, borderRadius: 18, padding: 18, marginBottom: 14, borderWidth: 1, borderColor: C.line },
   cardLocked: { alignItems: 'center', borderColor: C.goldDim },
+  cardWarn: { borderColor: C.gold },
   cardOpen: { alignItems: 'center', borderColor: C.good },
   vaultEmoji: { fontSize: 40, marginBottom: 6 },
   balance: { color: C.text, fontSize: 42, fontWeight: '900', letterSpacing: -1 },
