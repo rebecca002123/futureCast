@@ -4,6 +4,7 @@
     "slug": "eclipse-lookout",
     "owner": "rebecca0021",
     "version": "3.2.0",
+    "icon": "./assets/icon.png",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#12161f",
@@ -14,7 +15,8 @@
       "bundleIdentifier": "com.eclipselookout.app",
       "supportsTablet": true,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "UK Wildfire Watch uses your location to warn you when a wildfire is detected near you."
+        "NSLocationWhenInUseUsageDescription": "UK Wildfire Watch uses your location to warn you when a wildfire is detected near you.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
