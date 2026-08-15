@@ -42,9 +42,13 @@ Honest limitations, shown in-app too:
 
 ## Alerts in Expo Go vs a real build
 
-In Expo Go, proximity checks run while the app is open (foreground). For
-true background alerts, make a standalone build via EAS (below) — the app is
-already set up with notification channels and location permissions.
+In Expo Go, proximity checks run while the app is open (foreground). The
+standalone (EAS/TestFlight) build also registers a background task
+(`expo-background-task`) that re-checks the fire feeds periodically while
+the app is closed and sends a local notification if a new fire appears
+inside the alert radius. iOS schedules these checks opportunistically
+(typically every few hours, requires Background App Refresh to be on) — so
+the installed app warns sooner, but satellite latency still applies.
 
 ## Install and test via expo.dev (EAS)
 
