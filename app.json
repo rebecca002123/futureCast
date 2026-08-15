@@ -3,7 +3,7 @@
     "name": "UK Wildfire Watch",
     "slug": "eclipse-lookout",
     "owner": "rebecca0021",
-    "version": "3.1.0",
+    "version": "3.2.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#12161f",
@@ -28,6 +28,7 @@
       "bundler": "metro"
     },
     "plugins": [
+      "expo-background-task",
       [
         "expo-location",
         {

@@ -132,10 +132,11 @@ async function fetchWithTimeout(url, ms) {
 }
 
 // Fetch every feed (tolerating individual failures), filter to UK/Ireland,
-// dedupe, and return raw detections plus per-source status.
-export async function fetchDetections() {
+// dedupe, and return raw detections plus per-source status. Background tasks
+// pass a shorter timeout to stay inside iOS's execution budget.
+export async function fetchDetections(timeoutMs = 25000) {
   const results = await Promise.allSettled(
-    FEEDS.map((f) => fetchWithTimeout(f.url, 25000))
+    FEEDS.map((f) => fetchWithTimeout(f.url, timeoutMs))
   );
 
   const detections = [];

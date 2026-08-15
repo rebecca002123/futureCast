@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const SETTINGS_KEY = 'wildfire.settings.v1';
 const ALERTED_KEY = 'wildfire.alerted.v1';
+const COORDS_KEY = 'wildfire.lastCoords.v1';
 
 export const DEFAULT_SETTINGS = {
   radiusMiles: 30,
@@ -53,5 +54,27 @@ export async function saveAlerted(map) {
     await AsyncStorage.setItem(ALERTED_KEY, JSON.stringify(map));
   } catch {
     // non-fatal
+  }
+}
+
+// Last known position, so the background check has a location to measure
+// from even when it can't get a fresh GPS fix.
+export async function saveLastCoords(coords) {
+  try {
+    await AsyncStorage.setItem(
+      COORDS_KEY,
+      JSON.stringify({ latitude: coords.latitude, longitude: coords.longitude, savedAt: Date.now() })
+    );
+  } catch {
+    // non-fatal
+  }
+}
+
+export async function loadLastCoords() {
+  try {
+    const raw = await AsyncStorage.getItem(COORDS_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
   }
 }

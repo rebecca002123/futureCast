@@ -22,7 +22,8 @@ import {
   sendNearbyFireNotification,
   setupAndroidChannel,
 } from './src/notify';
-import { DEFAULT_SETTINGS, loadAlerted, loadSettings, saveAlerted, saveSettings } from './src/storage';
+import { DEFAULT_SETTINGS, loadAlerted, loadSettings, saveAlerted, saveLastCoords, saveSettings } from './src/storage';
+import { registerBackgroundCheck } from './src/background';
 
 // react-native-maps is native-only; guard so `expo start --web` still runs.
 let MapView = null;
@@ -169,6 +170,8 @@ export default function App() {
       // Ask for notification permission up front so nearby-fire alerts can
       // actually be delivered when the first one happens.
       if (s.notificationsEnabled) ensureNotificationPermission();
+      // Periodic checks while the app is closed (standalone builds only).
+      registerBackgroundCheck();
 
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
@@ -178,6 +181,7 @@ export default function App() {
           });
           setCoords(pos.coords);
           coordsRef.current = pos.coords;
+          saveLastCoords(pos.coords);
           fetchFireWeather(pos.coords.latitude, pos.coords.longitude)
             .then(setWeather)
             .catch(() => {});
@@ -430,8 +434,9 @@ export default function App() {
           </Pressable>
           <Text style={styles.smallNote}>
             Fire data refreshes automatically every 5 minutes while the app is open, and again each
-            time you come back to it. For background alerts with the app closed, install the
-            standalone build rather than Expo Go.
+            time you come back to it. The installed (TestFlight) app also checks periodically while
+            closed — iOS decides the exact timing, so keep Background App Refresh on in Settings. In
+            Expo Go, checks only run while the app is open.
           </Text>
         </View>
 
