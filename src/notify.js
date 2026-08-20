@@ -10,6 +10,8 @@ Notifications.setNotificationHandler({
   }),
 });
 
+const CHANNEL_ID = 'storm-alerts';
+
 export async function ensureNotificationPermission() {
   try {
     const current = await Notifications.getPermissionsAsync();
@@ -24,32 +26,59 @@ export async function ensureNotificationPermission() {
 export async function setupAndroidChannel() {
   if (Platform.OS !== 'android') return;
   try {
-    await Notifications.setNotificationChannelAsync('wildfire-alerts', {
-      name: 'Wildfire proximity alerts',
-      importance: Notifications.AndroidImportance.MAX,
+    await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
+      name: 'Atlantic storm alerts',
+      importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 400, 200, 400],
-      lightColor: '#ff5722',
+      lightColor: '#38bdf8',
     });
   } catch {
     // non-fatal
   }
 }
 
-export async function sendNearbyFireNotification(distanceMiles, placeName) {
+async function notify(title, body) {
   try {
-    const where = placeName ? ` near ${placeName}` : '';
     await Notifications.scheduleNotificationAsync({
       content: {
-        title: '🔥 Wildfire detected nearby',
-        body:
-          `Satellite has detected a fire${where}, about ${Math.round(distanceMiles)} miles from you. ` +
-          'Open the app for details. If you see fire or smoke, call 999.',
+        title,
+        body,
         sound: true,
-        ...(Platform.OS === 'android' ? { channelId: 'wildfire-alerts' } : null),
+        ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : null),
       },
       trigger: null, // deliver immediately
     });
   } catch {
     // Notifications can be limited in Expo Go — the in-app banner still shows.
   }
+}
+
+export function sendRiskNotification(storm, risk) {
+  const where = risk.closest?.place ? ` ${Math.round(risk.closest.miles)} miles from ${risk.closest.place}` : '';
+  return notify(
+    `🌀 ${storm.name}: UK risk ${risk.band.toLowerCase()}`,
+    `Its track now passes${where}. Open the app for the forecast and how confident it is.`
+  );
+}
+
+export function sendNewStormNotification(storm) {
+  return notify(
+    `🌀 ${storm.name} has formed in the Atlantic`,
+    'A new named system is being tracked. Open the app to see whether it has any UK potential.'
+  );
+}
+
+export function sendFormationNotification(area) {
+  const chance = Math.max(area.chance7 ?? 0, area.chance48 ?? 0);
+  return notify(
+    '🌊 New system likely to develop',
+    `${area.title} — ${chance}% chance of forming within 7 days (NHC outlook).`
+  );
+}
+
+export function sendWindNotification(day) {
+  return notify(
+    '💨 Windy spell in the UK forecast',
+    `Gusts around ${Math.round(day.gustMph)} mph forecast for ${day.dateISO} (${day.worstSpot}). Check Met Office warnings nearer the time.`
+  );
 }

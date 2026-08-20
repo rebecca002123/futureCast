@@ -1,0 +1,127 @@
+// One refresh, shared by the app and by the background check: pull the NHC
+// storm list, each storm's official forecast track, the tropical weather
+// outlook and the UK wind outlook, then work out what (if anything) is worth
+// telling the user about.
+
+import { fetchActiveStorms, fetchForecastTrack, fetchOutlook } from './storms';
+import { assessUKRisk, bandRank } from './ukrisk';
+import { fetchUKWindOutlook, WINDSTORM_GUST_MPH } from './ukwind';
+
+// Pull everything, tolerating individual failures — a missing outlook
+// shouldn't hide the storms, and vice versa.
+export async function fetchStormPicture(timeoutMs = 20000) {
+  const errors = [];
+
+  const [stormsRes, outlookRes, windRes] = await Promise.allSettled([
+    fetchActiveStorms(timeoutMs),
+    fetchOutlook(timeoutMs),
+    fetchUKWindOutlook(timeoutMs),
+  ]);
+
+  const storms = stormsRes.status === 'fulfilled' ? stormsRes.value : [];
+  if (stormsRes.status !== 'fulfilled') errors.push(`Storm list: ${errString(stormsRes.reason)}`);
+
+  const outlook = outlookRes.status === 'fulfilled' ? outlookRes.value : { areas: [], issuedAt: null, body: '' };
+  if (outlookRes.status !== 'fulfilled') errors.push(`Formation outlook: ${errString(outlookRes.reason)}`);
+
+  const wind = windRes.status === 'fulfilled' ? windRes.value : null;
+  if (windRes.status !== 'fulfilled') errors.push(`UK wind outlook: ${errString(windRes.reason)}`);
+
+  // Forecast tracks, one advisory per storm, fetched together.
+  const trackResults = await Promise.allSettled(
+    storms.map((s) => fetchForecastTrack(s, timeoutMs))
+  );
+
+  const now = new Date();
+  const assessed = storms.map((storm, i) => {
+    const track = trackResults[i].status === 'fulfilled' ? trackResults[i].value : null;
+    if (trackResults[i].status !== 'fulfilled') {
+      errors.push(`${storm.name} forecast track: ${errString(trackResults[i].reason)}`);
+    }
+    return { storm, track, risk: assessUKRisk(storm, track, now) };
+  });
+
+  assessed.sort((a, b) => b.risk.score - a.risk.score || b.storm.windKt - a.storm.windKt);
+
+  return {
+    assessed,
+    outlook,
+    wind,
+    errors,
+    stormsOk: stormsRes.status === 'fulfilled',
+    fetchedAt: now,
+  };
+}
+
+function errString(e) {
+  return String(e?.message || e || 'failed');
+}
+
+// Depressions are numbered ("Six", "Fourteen") until they earn a name.
+const NUMBER_NAMES =
+  /^(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|twenty-?\w+|thirty|thirty-?\w+)$/i;
+
+function isNamed(storm) {
+  return !!storm.name && !NUMBER_NAMES.test(storm.name.trim());
+}
+
+// What deserves a notification. Returns the events plus the updated
+// already-alerted map, so callers can persist it.
+export function evaluateAlerts(picture, settings, alerted) {
+  const events = [];
+  const next = { ...alerted };
+  const stamp = (key) => {
+    if (next[key]) return false;
+    next[key] = Date.now();
+    return true;
+  };
+
+  const threshold = bandRank(settings.alertBand || 'Watch');
+
+  for (const { storm, risk } of picture.assessed) {
+    // First time we've seen this storm with a name (numbered depressions get
+    // their alert later, when the NHC names them).
+    if (settings.formationAlerts && isNamed(storm) && storm.windKt >= 34 && stamp(`new:${storm.id}`)) {
+      events.push({ type: 'new-storm', storm, risk });
+    }
+    // Risk band crossing — one alert per storm per band, so an upgrade from
+    // Watch to Elevated still gets through.
+    if (bandRank(risk.band) >= threshold && bandRank(risk.band) > 0) {
+      if (stamp(`risk:${storm.id}:${risk.band}`)) {
+        events.push({ type: 'risk', storm, risk });
+      }
+    }
+  }
+
+  if (settings.formationAlerts) {
+    for (const area of picture.outlook?.areas || []) {
+      const chance = Math.max(area.chance7 ?? 0, area.chance48 ?? 0);
+      if (chance >= 60 && stamp(`form:${area.id}:${Math.floor(chance / 10) * 10}`)) {
+        events.push({ type: 'formation', area });
+      }
+    }
+  }
+
+  if (settings.windAlerts && picture.wind) {
+    for (const day of picture.wind.stormyDays || []) {
+      if (day.gustMph >= WINDSTORM_GUST_MPH && stamp(`wind:${day.dateISO}:${Math.floor(day.gustMph / 10) * 10}`)) {
+        events.push({ type: 'wind', day });
+      }
+    }
+  }
+
+  return { events, alerted: next };
+}
+
+// Headline for the top banner: the single most important thing right now.
+export function summarise(picture) {
+  const assessed = picture?.assessed || [];
+  const top = assessed[0];
+  const hurricanes = assessed.filter((a) => a.storm.windKt >= 64).length;
+  const forming = (picture?.outlook?.areas || []).filter(
+    (a) => Math.max(a.chance7 ?? 0, a.chance48 ?? 0) >= 40
+  ).length;
+  const stormyDay = picture?.wind?.stormyDays?.[0] || null;
+
+  return { top, hurricanes, forming, stormyDay, count: assessed.length };
+}
