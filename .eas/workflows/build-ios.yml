@@ -1,0 +1,15 @@
+# Builds the installable iOS app on EAS whenever main changes.
+# Runs on Expo's servers via the GitHub integration — watch it at
+# expo.dev → eclipse-lookout → Builds. The widget extension is signed
+# automatically (it's registered under extra.eas.build.experimental).
+name: Build iOS app
+on:
+  push:
+    branches: ['main']
+jobs:
+  build_ios:
+    name: Build iOS
+    type: build
+    params:
+      platform: ios
+      profile: production
