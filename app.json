@@ -38,6 +38,14 @@
     "runtimeVersion": {
       "policy": "sdkVersion"
     },
-    "scheme": "stormwatch"
+    "scheme": "stormwatch",
+    "updates": {
+      "url": "https://u.expo.dev/a68f1986-5c21-47ed-9f00-6c52e81d41dc"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "a68f1986-5c21-47ed-9f00-6c52e81d41dc"
+      }
+    }
   }
 }
