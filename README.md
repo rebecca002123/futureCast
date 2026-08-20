@@ -1,67 +1,145 @@
-# UK Wildfire Watch 🔥🛰
+# Atlantic Storm Watch 🌀🇬🇧
 
-Live map and proximity alerts for wildfires in the UK (and Ireland), built
-with [Expo](https://expo.dev) / React Native and real satellite data.
+Live Atlantic hurricane tracking with a UK slant, built with
+[Expo](https://expo.dev) / React Native: every storm the National Hurricane
+Center is advising on, everything that might still form, and an honest answer
+to the question that actually matters here — **is any of it coming for us?**
 
 ## What it does
 
-- **Live fire detections** — pulls NASA FIRMS active-fire data from four
-  satellite sensors (VIIRS on Suomi-NPP, NOAA-20 and NOAA-21 at 375 m
-  resolution, plus MODIS at 1 km), filters to the UK/Ireland, and clusters
-  detections into fire incidents.
-- **Map + list** — every incident on a map (colour-coded by how recent the
-  detection is) and in a list with place names, distance from you, number of
-  detections, confidence and fire intensity (FRP in megawatts).
-- **Nearby warnings** — with location enabled, the app warns you (banner,
-  pop-up and notification) when a fire is detected inside your chosen alert
-  radius (5/15/30/60 miles). Notification permission is requested at startup;
-  each incident only alerts once per day.
-- **Fire weather** — live conditions at your location from Open-Meteo
-  (temperature, humidity, wind, days since rain) rolled into an indicative
-  fire-conditions rating.
-- **Fresh data** — refreshes automatically every 5 minutes while open, every
-  time the app returns to the foreground, and on pull-to-refresh. Distances
-  are shown in miles.
+- **Every active Atlantic storm** — positions, category, sustained winds
+  (mph), central pressure and movement, straight from the NHC's live feed,
+  with the distance from the UK.
+- **Official forecast tracks** — each storm's NHC Forecast/Advisory is parsed
+  into its 5-day track and drawn on the map (solid line), with the forecast
+  intensity at each point.
+- **UK risk score** — the app extends the official track along the heading and
+  speed of its final leg (dashed line: the app's own extrapolation, *not* an
+  NHC forecast), finds the closest that path comes to the UK and when, and
+  scores it against how well the storm is aimed at us, whether it's recurving
+  north-east, and how strong it is. Tap any storm to see exactly how the score
+  was worked out.
+- **Formation watch** — the NHC Tropical Weather Outlook: areas of disturbed
+  weather with their 2-day and 7-day chances of developing, and a note on
+  whether they're in the part of the Atlantic that can send systems our way.
+- **UK wind outlook** — 16 days of maximum forecast gusts across nine UK
+  locations from the Open-Meteo global model. This is where an ex-hurricane
+  actually shows up for us: once a storm is being dragged across the Atlantic,
+  the models put the wind into this chart days before it arrives.
+- **Alerts** — notifications when a storm's UK risk reaches your chosen level
+  (Watch / Elevated / High), when a new named storm forms or an area is likely
+  to develop, and when gales appear in the UK forecast. Storms at Elevated or
+  High risk arrive as **time-sensitive** notifications that break through Focus
+  modes; everything else is a normal alert, and routine alerts are held
+  overnight (23:00–07:00) unless they're urgent. Each storm alert carries a
+  **Mute for 24h** button for a system that sits over the Atlantic for a week.
+  There's a **Send a test notification** button in Alerts so you can prove it
+  all works without waiting for a hurricane.
+- **Home Screen and Lock Screen widgets** — a WidgetKit extension showing the
+  highest UK risk at a glance. Small: the risk band and the storm behind it.
+  Medium: adds the closest approach and the next windy UK day. Lock Screen:
+  circular, rectangular and inline versions. Requires a real build — see below.
+
+## Widgets
+
+The widget lives in `targets/storm-widget` (SwiftUI + WidgetKit) and is built
+into the app by [`@bacons/apple-targets`](https://github.com/EvanBacon/expo-apple-targets).
+
+It can't run the app's JavaScript, so the app writes a small JSON snapshot into
+a shared **App Group** (`group.com.eclipselookout.app`) after every refresh —
+foreground *and* the background checks while the app is closed — and then asks
+WidgetKit to reload. The widget renders that snapshot and shows how old it is,
+so a stale widget is obvious rather than misleading.
+
+To build it:
+
+1. **Set your Apple Team ID.** Either export `APPLE_TEAM_ID=XXXXXXXXXX` (as an
+   EAS environment variable for cloud builds, or in your shell before
+   `npx expo prebuild`), or paste it into `app.json` under
+   `expo.ios.appleTeamId`. Find it in Xcode → Signing & Capabilities, or on
+   [developer.apple.com](https://developer.apple.com/account) under Membership.
+   Without it the app still builds, but the widget target won't sign.
+2. **Make a new native build** — `eas build` (or `npx expo prebuild -p ios &&
+   npx expo run:ios`). The widget is native code, so an over-the-air update
+   *cannot* deliver it: merging to `main` publishes JS only.
+3. On the phone: long-press the Home Screen → **+** → search for **Storm
+   Watch**. For the Lock Screen: Customise → the widget slot under the clock.
+
+EAS Build creates the App Group and the time-sensitive notification capability
+on the App ID as part of the build. Widgets never appear in Expo Go.
 
 ## Data sources & accuracy
 
 | Source | What | Notes |
 | --- | --- | --- |
-| [NASA FIRMS](https://firms.modaps.eosdis.nasa.gov/) | Active fire detections (keyless Europe 24 h CSV feeds) | VIIRS 375 m + MODIS 1 km; new data as satellites pass (~every 1–3 h) plus ~1–3 h processing latency |
-| [Open-Meteo](https://open-meteo.com/) | Current weather + 7-day rainfall | Free, no API key |
+| [NHC `CurrentStorms.json`](https://www.nhc.noaa.gov/CurrentStorms.json) | Active storm positions, intensity, movement | Keyless public feed |
+| NHC Forecast/Advisory (TCM) | Official forecast track to 5 days | One text product per storm, parsed in-app |
+| [NHC Tropical Weather Outlook](https://www.nhc.noaa.gov/gtwo.php?basin=atlc&fdays=7) | 2-day / 7-day formation chances | `TWOAT.xml` |
+| [Open-Meteo](https://open-meteo.com/) | 16-day UK wind and gust forecast | Free, no API key |
 
 Honest limitations, shown in-app too:
 
-- Satellites can **miss small, brief or smouldering fires**, and cloud cover
-  can hide detections; hot industrial sites occasionally show as false
-  positives (confidence is displayed per incident).
-- A detection means the satellite saw a hot spot in the last 24 h — the fire
-  may already be out.
-- **This is not an official warning service.** If you see fire or smoke,
-  call **999**.
+- Advisories are issued every **6 hours** (03/09/15/21 UTC) with intermediate
+  position updates in between, so a storm's position can be up to ~3 hours old.
+- The NHC **does not forecast beyond 5 days**. Everything past that — every
+  dashed track, and any "closest approach" more than five days out — is this
+  app's own extrapolation. Real storms wobble, stall, get absorbed and
+  recurve; treat the score as *"how much attention is this worth today"*, not
+  a forecast of what will happen.
+- Storms that do reach us have almost always stopped being hurricanes on the
+  way: they arrive as **ex-hurricane windstorms** — strong wind and heavy rain,
+  not a hurricane landfall.
+- Formation chances come from the NHC outlook text, which gives no coordinates,
+  so developing areas are described rather than mapped.
+- **This is not an official warning service.** For UK weather warnings use the
+  [Met Office](https://www.metoffice.gov.uk/weather/warnings-and-advice/uk-warnings);
+  for tropical cyclone advisories use the
+  [NHC](https://www.nhc.noaa.gov/). In an emergency call 999.
+
+## How the UK risk score is built
+
+For each storm, in `src/ukrisk.js`:
+
+1. Take the official NHC forecast track (0–120 h).
+2. Extend it forward for up to 84 more hours along the heading and speed of
+   its final leg, allowing a little acceleration when the motion is
+   north-easterly — the classic recurving path into the mid-latitude jet.
+3. Find the closest that combined path comes to any of eleven UK reference
+   points, and when.
+4. Score: proximity of that closest approach (discounted when it falls on the
+   extrapolated part), how closely the storm's heading points at the UK,
+   whether it's recurving north-east, its peak forecast intensity, and a
+   penalty for tracking west across the tropics. Long lead times get a
+   haircut.
+5. Band it: Minimal → Low → Watch → Elevated → High.
+
+Every factor that moved the number is shown in the storm's card, so the score
+can be argued with rather than just believed.
 
 ## Alerts in Expo Go vs a real build
 
-In Expo Go, proximity checks run while the app is open (foreground). The
-standalone (EAS/TestFlight) build also registers a background task
-(`expo-background-task`) that re-checks the fire feeds periodically while
-the app is closed and sends a local notification if a new fire appears
-inside the alert radius. iOS schedules these checks opportunistically
-(typically every few hours, requires Background App Refresh to be on) — so
-the installed app warns sooner, but satellite latency still applies.
+In Expo Go, checks run while the app is open (every 10 minutes, and whenever
+you return to it) — and there are no widgets, no notification action buttons
+and no time-sensitive delivery. The standalone (EAS/TestFlight) build also
+registers a background task (`expo-background-task`) that re-checks the feeds
+while the app is closed, sends a local notification and refreshes the widget.
+iOS schedules these opportunistically (typically every few hours, requires
+Background App Refresh to be on), so keep that on or the widget will drift.
 
 ## Install and test via expo.dev (EAS)
 
 This repo is linked to the EAS project `rebecca0021/eclipse-lookout` (same
-project as the previous apps — the app is now UK Wildfire Watch). Merging to
+project as the previous apps — the app is now Atlantic Storm Watch). Merging to
 `main` auto-publishes an update via `.eas/workflows/publish-update.yml`.
 
 1. Sign in at [expo.dev](https://expo.dev) and open the project.
-2. **Builds → Build from GitHub**, pick this branch (or `main` after
-   merging), platform, and the `preview` profile (Android gives an APK you
-   can install straight from the build page).
+2. **Builds → Build from GitHub**, pick this branch (or `main` after merging),
+   platform, and the `preview` profile.
 3. Because the bundle identifiers are unchanged, the new build installs over
    the previous app.
+
+Set `APPLE_TEAM_ID` as an EAS environment variable (Project → Environment
+variables) before building, so the widget extension can be signed.
 
 For a quick look without building: open the project's **Updates** page on
 expo.dev after merging and scan the update's QR code with **Expo Go**.
@@ -77,11 +155,20 @@ npx expo start        # scan the QR with Expo Go
 
 ## Project layout
 
-- `App.js` — UI (banner, map, fire list, weather, settings)
-- `src/fires.js` — FIRMS feeds: fetch, parse, UK filter, clustering, distance
-- `src/weather.js` — Open-Meteo fire-weather fetch + indicative rating
-- `src/notify.js` — proximity notifications
-- `src/storage.js` — settings + already-alerted persistence
+- `App.js` — UI (banner, Atlantic map, storm cards, formation watch, wind
+  outlook, settings)
+- `src/storms.js` — NHC feeds: current storms, forecast advisory parsing,
+  tropical weather outlook, geometry helpers
+- `src/ukrisk.js` — track extrapolation and the UK risk score
+- `src/ukwind.js` — Open-Meteo 16-day UK gust outlook
+- `src/watch.js` — one shared refresh + which events deserve an alert
+- `src/notify.js` — notification content, categories and interruption levels
+- `src/storage.js` — settings, alert history, mutes, last-known snapshot
+- `src/background.js` — periodic checks while the app is closed
+- `src/widget.js` — the snapshot handed to the widget through the App Group
+- `targets/storm-widget/` — the WidgetKit extension (SwiftUI)
+- `app.config.js` — injects `APPLE_TEAM_ID` from the environment
+- `tools/make-icon.mjs` — regenerates `assets/icon.png`
 
 ---
 
