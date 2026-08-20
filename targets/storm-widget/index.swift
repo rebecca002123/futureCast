@@ -10,7 +10,7 @@
 import WidgetKit
 import SwiftUI
 
-let appGroup = "group.com.eclipselookout.app"
+let appGroup = "group.com.atlanticstormwatch.app"
 let snapshotKey = "stormWatch"
 
 // MARK: - Data
