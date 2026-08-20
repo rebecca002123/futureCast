@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const SETTINGS_KEY = 'storms.settings.v1';
 const ALERTED_KEY = 'storms.alerted.v1';
 const SNAPSHOT_KEY = 'storms.snapshot.v1';
+const MUTED_KEY = 'storms.muted.v1';
 
 export const DEFAULT_SETTINGS = {
   notificationsEnabled: true,
@@ -13,6 +14,9 @@ export const DEFAULT_SETTINGS = {
   formationAlerts: true,
   // Alert when the UK 16-day forecast picks up a gale/storm-force day.
   windAlerts: true,
+  // Hold non-urgent alerts overnight (23:00–07:00). A storm at High risk
+  // still comes through — that's the whole point of the app.
+  quietHours: true,
 };
 
 export async function loadSettings() {
@@ -80,5 +84,43 @@ export async function loadSnapshot() {
     return snap;
   } catch {
     return null;
+  }
+}
+
+// Storms the user has muted from a notification's "Mute for 24h" button.
+export async function loadMuted() {
+  try {
+    const raw = await AsyncStorage.getItem(MUTED_KEY);
+    const map = raw ? JSON.parse(raw) : {};
+    const now = Date.now();
+    const live = {};
+    for (const [id, until] of Object.entries(map)) {
+      if (until > now) live[id] = until;
+    }
+    return live;
+  } catch {
+    return {};
+  }
+}
+
+export async function muteStorm(stormId, hours = 24) {
+  try {
+    const muted = await loadMuted();
+    muted[stormId] = Date.now() + hours * 3600000;
+    await AsyncStorage.setItem(MUTED_KEY, JSON.stringify(muted));
+    return muted;
+  } catch {
+    return {};
+  }
+}
+
+export async function unmuteStorm(stormId) {
+  try {
+    const muted = await loadMuted();
+    delete muted[stormId];
+    await AsyncStorage.setItem(MUTED_KEY, JSON.stringify(muted));
+    return muted;
+  } catch {
+    return {};
   }
 }

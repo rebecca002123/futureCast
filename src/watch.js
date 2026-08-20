@@ -67,50 +67,81 @@ function isNamed(storm) {
 
 // What deserves a notification. Returns the events plus the updated
 // already-alerted map, so callers can persist it.
-export function evaluateAlerts(picture, settings, alerted) {
+//
+// Two things can hold an alert back without burning it: a storm the user has
+// muted, and quiet hours. Neither stamps the alert as sent, so a suppressed
+// alert is re-offered on the next refresh (after 07:00, or once the mute
+// expires) rather than being lost.
+export function evaluateAlerts(picture, settings, alerted, muted = {}, now = new Date()) {
   const events = [];
   const next = { ...alerted };
-  const stamp = (key) => {
-    if (next[key]) return false;
-    next[key] = Date.now();
-    return true;
-  };
-
   const threshold = bandRank(settings.alertBand || 'Watch');
+  const candidates = [];
 
   for (const { storm, risk } of picture.assessed) {
+    if (muted[storm.id] > now.getTime()) continue;
+
     // First time we've seen this storm with a name (numbered depressions get
     // their alert later, when the NHC names them).
-    if (settings.formationAlerts && isNamed(storm) && storm.windKt >= 34 && stamp(`new:${storm.id}`)) {
-      events.push({ type: 'new-storm', storm, risk });
+    if (settings.formationAlerts && isNamed(storm) && storm.windKt >= 34) {
+      candidates.push({
+        key: `new:${storm.id}`,
+        urgent: false,
+        event: { type: 'new-storm', storm, risk },
+      });
     }
     // Risk band crossing — one alert per storm per band, so an upgrade from
     // Watch to Elevated still gets through.
     if (bandRank(risk.band) >= threshold && bandRank(risk.band) > 0) {
-      if (stamp(`risk:${storm.id}:${risk.band}`)) {
-        events.push({ type: 'risk', storm, risk });
-      }
+      candidates.push({
+        key: `risk:${storm.id}:${risk.band}`,
+        urgent: risk.band === 'High' || risk.band === 'Elevated',
+        event: { type: 'risk', storm, risk },
+      });
     }
   }
 
   if (settings.formationAlerts) {
     for (const area of picture.outlook?.areas || []) {
       const chance = Math.max(area.chance7 ?? 0, area.chance48 ?? 0);
-      if (chance >= 60 && stamp(`form:${area.id}:${Math.floor(chance / 10) * 10}`)) {
-        events.push({ type: 'formation', area });
+      if (chance >= 60) {
+        candidates.push({
+          key: `form:${area.id}:${Math.floor(chance / 10) * 10}`,
+          urgent: false,
+          event: { type: 'formation', area },
+        });
       }
     }
   }
 
   if (settings.windAlerts && picture.wind) {
     for (const day of picture.wind.stormyDays || []) {
-      if (day.gustMph >= WINDSTORM_GUST_MPH && stamp(`wind:${day.dateISO}:${Math.floor(day.gustMph / 10) * 10}`)) {
-        events.push({ type: 'wind', day });
+      if (day.gustMph >= WINDSTORM_GUST_MPH) {
+        candidates.push({
+          key: `wind:${day.dateISO}:${Math.floor(day.gustMph / 10) * 10}`,
+          urgent: day.gustMph >= 70,
+          event: { type: 'wind', day },
+        });
       }
     }
   }
 
+  const quiet = inQuietHours(now, settings);
+  for (const candidate of candidates) {
+    if (next[candidate.key]) continue;
+    if (quiet && !candidate.urgent) continue; // hold it, don't burn it
+    next[candidate.key] = now.getTime();
+    events.push(candidate.event);
+  }
+
   return { events, alerted: next };
+}
+
+// 23:00–07:00 local. Urgent alerts ignore this.
+export function inQuietHours(now = new Date(), settings = {}) {
+  if (!settings.quietHours) return false;
+  const hour = now.getHours();
+  return hour >= 23 || hour < 7;
 }
 
 // Headline for the top banner: the single most important thing right now.

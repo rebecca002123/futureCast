@@ -16,6 +16,12 @@
       "supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
+      },
+      "entitlements": {
+        "com.apple.security.application-groups": [
+          "group.com.eclipselookout.app"
+        ],
+        "com.apple.developer.usernotifications.time-sensitive": true
       }
     },
     "android": {
@@ -26,7 +32,8 @@
       "bundler": "metro"
     },
     "plugins": [
-      "expo-background-task"
+      "expo-background-task",
+      "@bacons/apple-targets"
     ],
     "runtimeVersion": {
       "policy": "sdkVersion"
@@ -38,6 +45,7 @@
       "eas": {
         "projectId": "fdbaffe8-c655-46ff-9262-6e1170a73c4b"
       }
-    }
+    },
+    "scheme": "stormwatch"
   }
 }

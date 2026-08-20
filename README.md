@@ -28,7 +28,45 @@ to the question that actually matters here — **is any of it coming for us?**
   the models put the wind into this chart days before it arrives.
 - **Alerts** — notifications when a storm's UK risk reaches your chosen level
   (Watch / Elevated / High), when a new named storm forms or an area is likely
-  to develop, and when gales appear in the UK forecast.
+  to develop, and when gales appear in the UK forecast. Storms at Elevated or
+  High risk arrive as **time-sensitive** notifications that break through Focus
+  modes; everything else is a normal alert, and routine alerts are held
+  overnight (23:00–07:00) unless they're urgent. Each storm alert carries a
+  **Mute for 24h** button for a system that sits over the Atlantic for a week.
+  There's a **Send a test notification** button in Alerts so you can prove it
+  all works without waiting for a hurricane.
+- **Home Screen and Lock Screen widgets** — a WidgetKit extension showing the
+  highest UK risk at a glance. Small: the risk band and the storm behind it.
+  Medium: adds the closest approach and the next windy UK day. Lock Screen:
+  circular, rectangular and inline versions. Requires a real build — see below.
+
+## Widgets
+
+The widget lives in `targets/storm-widget` (SwiftUI + WidgetKit) and is built
+into the app by [`@bacons/apple-targets`](https://github.com/EvanBacon/expo-apple-targets).
+
+It can't run the app's JavaScript, so the app writes a small JSON snapshot into
+a shared **App Group** (`group.com.eclipselookout.app`) after every refresh —
+foreground *and* the background checks while the app is closed — and then asks
+WidgetKit to reload. The widget renders that snapshot and shows how old it is,
+so a stale widget is obvious rather than misleading.
+
+To build it:
+
+1. **Set your Apple Team ID.** Either export `APPLE_TEAM_ID=XXXXXXXXXX` (as an
+   EAS environment variable for cloud builds, or in your shell before
+   `npx expo prebuild`), or paste it into `app.json` under
+   `expo.ios.appleTeamId`. Find it in Xcode → Signing & Capabilities, or on
+   [developer.apple.com](https://developer.apple.com/account) under Membership.
+   Without it the app still builds, but the widget target won't sign.
+2. **Make a new native build** — `eas build` (or `npx expo prebuild -p ios &&
+   npx expo run:ios`). The widget is native code, so an over-the-air update
+   *cannot* deliver it: merging to `main` publishes JS only.
+3. On the phone: long-press the Home Screen → **+** → search for **Storm
+   Watch**. For the Lock Screen: Customise → the widget slot under the clock.
+
+EAS Build creates the App Group and the time-sensitive notification capability
+on the App ID as part of the build. Widgets never appear in Expo Go.
 
 ## Data sources & accuracy
 
@@ -81,10 +119,12 @@ can be argued with rather than just believed.
 ## Alerts in Expo Go vs a real build
 
 In Expo Go, checks run while the app is open (every 10 minutes, and whenever
-you return to it). The standalone (EAS/TestFlight) build also registers a
-background task (`expo-background-task`) that re-checks the feeds while the app
-is closed and sends a local notification. iOS schedules these opportunistically
-(typically every few hours, requires Background App Refresh to be on).
+you return to it) — and there are no widgets, no notification action buttons
+and no time-sensitive delivery. The standalone (EAS/TestFlight) build also
+registers a background task (`expo-background-task`) that re-checks the feeds
+while the app is closed, sends a local notification and refreshes the widget.
+iOS schedules these opportunistically (typically every few hours, requires
+Background App Refresh to be on), so keep that on or the widget will drift.
 
 ## Install and test via expo.dev (EAS)
 
@@ -97,6 +137,9 @@ project as the previous apps — the app is now Atlantic Storm Watch). Merging t
    platform, and the `preview` profile.
 3. Because the bundle identifiers are unchanged, the new build installs over
    the previous app.
+
+Set `APPLE_TEAM_ID` as an EAS environment variable (Project → Environment
+variables) before building, so the widget extension can be signed.
 
 For a quick look without building: open the project's **Updates** page on
 expo.dev after merging and scan the update's QR code with **Expo Go**.
@@ -119,9 +162,12 @@ npx expo start        # scan the QR with Expo Go
 - `src/ukrisk.js` — track extrapolation and the UK risk score
 - `src/ukwind.js` — Open-Meteo 16-day UK gust outlook
 - `src/watch.js` — one shared refresh + which events deserve an alert
-- `src/notify.js` — notification content
-- `src/storage.js` — settings, alert history, last-known snapshot
+- `src/notify.js` — notification content, categories and interruption levels
+- `src/storage.js` — settings, alert history, mutes, last-known snapshot
 - `src/background.js` — periodic checks while the app is closed
+- `src/widget.js` — the snapshot handed to the widget through the App Group
+- `targets/storm-widget/` — the WidgetKit extension (SwiftUI)
+- `app.config.js` — injects `APPLE_TEAM_ID` from the environment
 - `tools/make-icon.mjs` — regenerates `assets/icon.png`
 
 ---

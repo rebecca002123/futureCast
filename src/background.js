@@ -14,8 +14,9 @@ import {
   sendRiskNotification,
   sendWindNotification,
 } from './notify';
-import { loadAlerted, loadSettings, saveAlerted, saveSnapshot } from './storage';
+import { loadAlerted, loadMuted, loadSettings, saveAlerted, saveSnapshot } from './storage';
 import { evaluateAlerts, fetchStormPicture } from './watch';
+import { updateWidget } from './widget';
 
 export const BACKGROUND_TASK_NAME = 'storm-background-check';
 
@@ -25,15 +26,19 @@ const BACKGROUND_TIMEOUT_MS = 12000;
 
 export async function runStormCheck(timeoutMs = BACKGROUND_TIMEOUT_MS) {
   const settings = await loadSettings();
-  if (!settings.notificationsEnabled) return { skipped: true };
 
   const picture = await fetchStormPicture(timeoutMs);
   if (!picture.stormsOk && !picture.wind) return { failed: true };
 
-  const alerted = await loadAlerted();
-  const { events, alerted: nextAlerted } = evaluateAlerts(picture, settings, alerted);
-  await saveAlerted(nextAlerted);
   await saveSnapshot(snapshotOf(picture));
+  // Refresh the Home Screen widget even when notifications are off — a widget
+  // showing yesterday's storm is worse than no widget.
+  updateWidget(picture);
+  if (!settings.notificationsEnabled) return { skipped: true, widget: true };
+
+  const [alerted, muted] = await Promise.all([loadAlerted(), loadMuted()]);
+  const { events, alerted: nextAlerted } = evaluateAlerts(picture, settings, alerted, muted);
+  await saveAlerted(nextAlerted);
 
   // One notification per check, most important first, so a busy season
   // doesn't turn into a burst of alerts.

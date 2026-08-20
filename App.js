@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import * as Notifications from 'expo-notifications';
 
 import {
   classificationLabel,
@@ -26,10 +27,30 @@ import {
 } from './src/storms';
 import { outlookWatchLevel, UK_CENTRE } from './src/ukrisk';
 import { WINDSTORM_GUST_MPH } from './src/ukwind';
-import { evaluateAlerts, fetchStormPicture, summarise } from './src/watch';
-import { ensureNotificationPermission, setupAndroidChannel } from './src/notify';
-import { DEFAULT_SETTINGS, loadAlerted, loadSettings, loadSnapshot, saveAlerted, saveSettings, saveSnapshot } from './src/storage';
+import { evaluateAlerts, fetchStormPicture, inQuietHours, summarise } from './src/watch';
+import {
+  clearBadge,
+  ensureNotificationPermission,
+  getPermissionStatus,
+  MUTE_ACTION,
+  sendTestNotification,
+  setupAndroidChannel,
+  setupNotificationCategories,
+} from './src/notify';
+import {
+  DEFAULT_SETTINGS,
+  loadAlerted,
+  loadMuted,
+  loadSettings,
+  loadSnapshot,
+  muteStorm,
+  saveAlerted,
+  saveSettings,
+  saveSnapshot,
+  unmuteStorm,
+} from './src/storage';
 import { notifyFor, registerBackgroundCheck, snapshotOf } from './src/background';
+import { updateWidget } from './src/widget';
 
 // react-native-maps is native-only; guard so `expo start --web` still runs.
 let MapView = null;
@@ -61,9 +82,14 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [expanded, setExpanded] = useState({});
+  const [muted, setMuted] = useState({});
+  const [permission, setPermission] = useState(null);
+  const [testSent, setTestSent] = useState(false);
   const [now, setNow] = useState(new Date());
 
   const alertedRef = useRef({});
+  const mutedRef = useRef({});
+  const pictureRef = useRef(null);
   const settingsRef = useRef(settings);
   const lastFetchRef = useRef(0);
   settingsRef.current = settings;
@@ -73,11 +99,13 @@ export default function App() {
     try {
       const next = await fetchStormPicture();
       setPicture(next);
+      pictureRef.current = next;
       lastFetchRef.current = Date.now();
 
       if (next.stormsOk || next.wind) {
         saveSnapshot(snapshotOf(next));
-        const { events, alerted } = evaluateAlerts(next, settingsRef.current, alertedRef.current);
+        updateWidget(next);
+        const { events, alerted } = evaluateAlerts(next, settingsRef.current, alertedRef.current, mutedRef.current);
         alertedRef.current = alerted;
         saveAlerted(alerted);
         if (settingsRef.current.notificationsEnabled && events.length) {
@@ -98,13 +126,23 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const [s, alerted, snap] = await Promise.all([loadSettings(), loadAlerted(), loadSnapshot()]);
+      const [s, alerted, snap, mutedMap] = await Promise.all([
+        loadSettings(),
+        loadAlerted(),
+        loadSnapshot(),
+        loadMuted(),
+      ]);
       setSettings(s);
       settingsRef.current = s;
       alertedRef.current = alerted;
+      mutedRef.current = mutedMap;
+      setMuted(mutedMap);
       setSnapshot(snap);
       await setupAndroidChannel();
-      if (s.notificationsEnabled) ensureNotificationPermission();
+      await setupNotificationCategories();
+      if (s.notificationsEnabled) await ensureNotificationPermission();
+      setPermission(await getPermissionStatus());
+      clearBadge();
       registerBackgroundCheck();
       refresh();
     })();
@@ -112,12 +150,32 @@ export default function App() {
     const interval = setInterval(() => refresh(), REFRESH_MS);
     const tick = setInterval(() => setNow(new Date()), 60000);
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active' && Date.now() - lastFetchRef.current > STALE_MS) refresh();
+      if (state !== 'active') return;
+      clearBadge();
+      if (Date.now() - lastFetchRef.current > STALE_MS) refresh();
     });
+
+    // "Mute for 24h" on a storm alert, tapped from the notification itself.
+    let responseSub = null;
+    try {
+      responseSub = Notifications.addNotificationResponseReceivedListener(async (response) => {
+        const { actionIdentifier, notification } = response || {};
+        const stormId = notification?.request?.content?.data?.stormId;
+        if (actionIdentifier === MUTE_ACTION && stormId) {
+          const next = await muteStorm(stormId, 24);
+          mutedRef.current = next;
+          setMuted(next);
+        }
+      });
+    } catch {
+      // Notification responses aren't available on every platform.
+    }
+
     return () => {
       clearInterval(interval);
       clearInterval(tick);
       sub.remove();
+      responseSub?.remove();
     };
   }, [refresh]);
 
@@ -128,6 +186,22 @@ export default function App() {
       saveSettings(next);
       return next;
     });
+  }, []);
+
+  const sendTest = useCallback(async () => {
+    const granted = await ensureNotificationPermission();
+    const status = await getPermissionStatus();
+    setPermission(status);
+    if (!granted) return;
+    await sendTestNotification(pictureRef.current);
+    setTestSent(true);
+    setTimeout(() => setTestSent(false), 5000);
+  }, []);
+
+  const unmute = useCallback(async (stormId) => {
+    const next = await unmuteStorm(stormId);
+    mutedRef.current = next;
+    setMuted(next);
   }, []);
 
   const summary = useMemo(() => summarise(picture), [picture]);
@@ -303,6 +377,7 @@ export default function App() {
             storm={storm}
             risk={risk}
             now={now}
+            muted={muted[storm.id] > now.getTime()}
             open={!!expanded[storm.id]}
             onToggle={() => setExpanded((p) => ({ ...p, [storm.id]: !p[storm.id] }))}
           />
@@ -395,10 +470,72 @@ export default function App() {
             value={settings.windAlerts}
             onPress={() => updateSettings({ windAlerts: !settings.windAlerts })}
           />
+          <Toggle
+            label="Quiet overnight"
+            hint="Holds routine alerts between 11pm and 7am. A storm at Elevated or High risk still comes straight through."
+            value={settings.quietHours}
+            onPress={() => updateSettings({ quietHours: !settings.quietHours })}
+          />
+
+          {settings.notificationsEnabled && permission && !permission.granted ? (
+            <View style={styles.warnRow}>
+              <Text style={styles.warnText}>
+                Notifications are turned off for this app in your phone's settings, so alerts can't be delivered.
+              </Text>
+              <Pressable onPress={() => Linking.openSettings()}>
+                <Text style={styles.linkBtnText}>Open phone settings ↗</Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          <Pressable style={styles.testBtn} onPress={sendTest}>
+            <Text style={styles.testBtnText}>
+              {testSent ? '✅ Test notification sent' : '🔔 Send a test notification'}
+            </Text>
+          </Pressable>
+
+          {Object.keys(muted).length ? (
+            <View style={styles.mutedWrap}>
+              <Text style={styles.detailHeading}>Muted storms</Text>
+              {Object.entries(muted).map(([id, until]) => {
+                const storm = assessed.find((a) => a.storm.id === id)?.storm;
+                return (
+                  <Pressable key={id} style={styles.mutedRow} onPress={() => unmute(id)}>
+                    <Text style={styles.cardBody}>
+                      {storm ? storm.name : id.toUpperCase()} · quiet until{' '}
+                      {new Date(until).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                    </Text>
+                    <Text style={styles.toggleValue}>Unmute</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
+
+          <Text style={styles.smallNote}>
+            Storm alerts arrive as time-sensitive notifications when a storm is at Elevated or High risk, so they break
+            through Focus modes; everything else is a normal alert. Each storm alert has a "Mute for 24h" button if a
+            system is lingering{inQuietHours(now, settings) ? ' · quiet hours are active right now' : ''}.
+          </Text>
           <Text style={styles.smallNote}>
             Data refreshes every 10 minutes while the app is open and each time you come back to it. The installed
             (TestFlight) app also checks periodically while closed — iOS decides the exact timing, so keep Background
             App Refresh on. In Expo Go, checks only run while the app is open.
+          </Text>
+        </View>
+
+        <Text style={styles.sectionTitle}>Home Screen widget</Text>
+        <View style={styles.card}>
+          <Text style={styles.cardBody}>
+            Add the Atlantic Storm Watch widget to see the highest UK risk without opening the app: long-press your
+            Home Screen → <Text style={styles.bold}>+</Text> → search for Storm Watch. The small size shows the risk
+            band and the storm behind it, the medium size adds the closest approach and the next windy UK day, and
+            there are Lock Screen versions too.
+          </Text>
+          <Text style={styles.smallNote}>
+            The widget shows whatever the app last worked out. It updates every time the app refreshes — including the
+            background checks while the app is closed — so keep Background App Refresh on to stop it going stale.
+            Widgets need the installed build; they don't appear in Expo Go.
           </Text>
         </View>
 
@@ -456,7 +593,7 @@ function confidenceSentence(risk) {
   return 'Very low confidence at this range — worth watching, nothing more.';
 }
 
-function StormCard({ storm, risk, now, open, onToggle }) {
+function StormCard({ storm, risk, now, open, onToggle, muted }) {
   const cat = saffirSimpson(storm.windKt);
   const accent = stormColor(storm);
   const closestTime = risk.closest?.point?.time;
@@ -467,6 +604,7 @@ function StormCard({ storm, risk, now, open, onToggle }) {
           <Text style={styles.stormName}>{storm.name}</Text>
           <Text style={styles.stormType}>
             {cat ? `Category ${cat} hurricane` : classificationLabel(storm.classification)}
+            {muted ? ' · 🔕 muted' : ''}
           </Text>
         </View>
         <View style={[styles.riskPill, { backgroundColor: risk.color }]}>
@@ -580,10 +718,13 @@ function ChanceBar({ label, value }) {
   );
 }
 
-function Toggle({ label, value, onPress }) {
+function Toggle({ label, value, onPress, hint }) {
   return (
     <Pressable style={styles.toggleRow} onPress={onPress}>
-      <Text style={styles.cardBody}>{label}</Text>
+      <View style={styles.toggleLabelWrap}>
+        <Text style={styles.cardBody}>{label}</Text>
+        {hint ? <Text style={styles.toggleHint}>{hint}</Text> : null}
+      </View>
       <Text style={styles.toggleValue}>{value ? 'On 🔔' : 'Off 🔕'}</Text>
     </Pressable>
   );
@@ -693,7 +834,19 @@ const styles = StyleSheet.create({
   chipText: { color: '#c6ccd8', fontSize: 13, fontWeight: '600' },
   chipTextActive: { color: '#fff' },
   toggleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 14 },
+  toggleLabelWrap: { flex: 1, marginRight: 12 },
+  toggleHint: { color: '#77808f', fontSize: 11.5, lineHeight: 16, marginTop: 2 },
   toggleValue: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  bold: { fontWeight: '800', color: '#fff' },
+
+  warnRow: { marginTop: 14, backgroundColor: '#3a2222', borderRadius: 10, padding: 10 },
+  warnText: { color: '#f0b8ae', fontSize: 13, lineHeight: 18 },
+
+  testBtn: { marginTop: 16, backgroundColor: '#232c3d', borderRadius: 10, paddingVertical: 11, alignItems: 'center' },
+  testBtnText: { color: '#cfe0f5', fontSize: 14, fontWeight: '700' },
+
+  mutedWrap: { marginTop: 14, borderTopWidth: 1, borderTopColor: '#242e42', paddingTop: 6 },
+  mutedRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 },
 
   sourceLine: { color: '#c6ccd8', fontSize: 13, lineHeight: 22 },
 });
