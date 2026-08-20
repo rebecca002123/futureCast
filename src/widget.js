@@ -15,7 +15,7 @@ import { fmtDayLabel, ktToMph, saffirSimpson } from './storms';
 
 // Must match `ios.entitlements` in app.json and the widget's
 // expo-target.config.js.
-export const APP_GROUP = 'group.com.eclipselookout.app';
+export const APP_GROUP = 'group.com.atlanticstormwatch.app';
 export const WIDGET_KEY = 'stormWatch';
 export const WIDGET_KIND = 'StormWidget';
 

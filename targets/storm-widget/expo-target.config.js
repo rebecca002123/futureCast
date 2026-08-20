@@ -16,7 +16,7 @@ module.exports = (config) => ({
     // writes after every refresh (see src/widget.js).
     'com.apple.security.application-groups':
       config.ios?.entitlements?.['com.apple.security.application-groups'] ?? [
-        'group.com.eclipselookout.app',
+        'group.com.atlanticstormwatch.app',
       ],
   },
 });

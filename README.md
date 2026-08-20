@@ -128,18 +128,28 @@ Background App Refresh to be on), so keep that on or the widget will drift.
 
 ## Install and test via expo.dev (EAS)
 
-This repo is linked to the EAS project `rebecca0021/eclipse-lookout` (same
-project as the previous apps — the app is now Atlantic Storm Watch). Merging to
-`main` auto-publishes an update via `.eas/workflows/publish-update.yml`.
+Atlantic Storm Watch is its **own app** — new slug (`atlantic-storm-watch`),
+new bundle identifier (`com.atlanticstormwatch.app`) — so it installs
+alongside anything you had before rather than replacing it.
 
-1. Sign in at [expo.dev](https://expo.dev) and open the project.
-2. **Builds → Build from GitHub**, pick this branch (or `main` after merging),
-   platform, and the `preview` profile.
-3. Because the bundle identifiers are unchanged, the new build installs over
-   the previous app.
+One-time setup on a computer with Node (creates the new EAS project and
+registers the app with Apple):
 
-Set `APPLE_TEAM_ID` as an EAS environment variable (Project → Environment
-variables) before building, so the widget extension can be signed.
+```bash
+git clone https://github.com/rebecca002123/futureCast
+cd futureCast && npm install
+npx eas-cli login
+npx eas-cli init                 # creates @rebecca0021/atlantic-storm-watch, writes the project ID
+npx eas-cli update:configure     # writes the OTA updates URL
+git add app.json && git commit -m "Link EAS project" && git push
+npx eas-cli build -p ios --profile production
+```
+
+The build prompts you to sign in with your Apple ID once — it registers the
+new bundle IDs, the App Group and the widget's provisioning profile, then
+builds a TestFlight-ready app. Afterwards, link the GitHub repo to the new
+project on expo.dev (project → GitHub) so the `.eas/workflows` automations
+(publish an update + build on every merge to `main`) run again.
 
 For a quick look without building: open the project's **Updates** page on
 expo.dev after merging and scan the update's QR code with **Expo Go**.
