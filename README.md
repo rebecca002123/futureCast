@@ -40,6 +40,11 @@ to the question that actually matters here — **is any of it coming for us?**
   1991–2020 average for the date, days to the 10 September climatological
   peak, a running log of every storm the app has tracked this season, and
   the ex-hurricanes that actually reached the UK before.
+- **Live wind radar** — a Windy-style animated wind map of the North
+  Atlantic and Europe: a colour layer of model wind speed, flowing particle
+  streamlines, real coastlines, active storms overlaid, a 4-day timeline
+  slider, and touch-to-read wind speed at any point. Self-contained canvas
+  engine in a WebView (`src/radar.js`), 2° Open-Meteo grid, no API key.
 - **Atlantic lows radar** — a model-grid scan of the whole North Atlantic
   that finds every deep low in the 7-day forecast and follows it: crucially,
   this keeps tracking an **ex-hurricane after the NHC stops advising on it**
