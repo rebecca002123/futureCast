@@ -10,6 +10,7 @@ import * as TaskManager from 'expo-task-manager';
 
 import {
   sendFloodNotification,
+  sendLowNotification,
   sendFormationNotification,
   sendNewStormNotification,
   sendRiskNotification,
@@ -52,7 +53,7 @@ export async function runStormCheck(timeoutMs = BACKGROUND_TIMEOUT_MS) {
 }
 
 function pickMostImportant(events) {
-  const order = { warning: 0, flood: 1, risk: 2, 'new-storm': 3, formation: 4, wind: 5 };
+  const order = { warning: 0, flood: 1, risk: 2, low: 3, 'new-storm': 4, formation: 5, wind: 6 };
   return [...events].sort((a, b) => {
     const byType = (order[a.type] ?? 9) - (order[b.type] ?? 9);
     if (byType !== 0) return byType;
@@ -74,6 +75,8 @@ export async function notifyFor(event) {
       return sendWarningNotification(event.warning, event.stormName);
     case 'flood':
       return sendFloodNotification(event.flood);
+    case 'low':
+      return sendLowNotification(event.low);
     default:
       return null;
   }

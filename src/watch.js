@@ -8,6 +8,7 @@ import { assessUKRisk, bandRank, closestToPlace } from './ukrisk';
 import { fetchPlaceWindOutlook, fetchUKWindOutlook, WINDSTORM_GUST_MPH } from './ukwind';
 import { fetchUKWarnings } from './ukwarnings';
 import { fetchFloods } from './floods';
+import { fetchAtlanticLows, lowThreatLabel, matchExStorm } from './lows';
 
 // Pull everything, tolerating individual failures — a missing outlook
 // shouldn't hide the storms, and vice versa. `place` ({name, lat, lon} or
@@ -15,7 +16,7 @@ import { fetchFloods } from './floods';
 export async function fetchStormPicture(timeoutMs = 20000, place = null) {
   const errors = [];
 
-  const [stormsRes, outlookRes, windRes, warningsRes, floodsRes, placeWindRes] =
+  const [stormsRes, outlookRes, windRes, warningsRes, floodsRes, placeWindRes, lowsRes] =
     await Promise.allSettled([
       fetchActiveStorms(timeoutMs),
       fetchOutlook(timeoutMs),
@@ -23,6 +24,7 @@ export async function fetchStormPicture(timeoutMs = 20000, place = null) {
       fetchUKWarnings(timeoutMs),
       fetchFloods(timeoutMs),
       place ? fetchPlaceWindOutlook(place.lat, place.lon, timeoutMs) : Promise.resolve(null),
+      fetchAtlanticLows(timeoutMs),
     ]);
 
   const storms = stormsRes.status === 'fulfilled' ? stormsRes.value : [];
@@ -44,6 +46,9 @@ export async function fetchStormPicture(timeoutMs = 20000, place = null) {
   if (place && placeWindRes.status !== 'fulfilled')
     errors.push(`${place.name} wind outlook: ${errString(placeWindRes.reason)}`);
 
+  const lowsRaw = lowsRes.status === 'fulfilled' ? lowsRes.value : null;
+  if (lowsRes.status !== 'fulfilled') errors.push(`Atlantic lows: ${errString(lowsRes.reason)}`);
+
   // Forecast tracks, one advisory per storm, fetched together.
   const trackResults = await Promise.allSettled(
     storms.map((s) => fetchForecastTrack(s, timeoutMs))
@@ -59,6 +64,19 @@ export async function fetchStormPicture(timeoutMs = 20000, place = null) {
   });
 
   assessed.sort((a, b) => b.risk.score - a.risk.score || b.storm.windKt - a.storm.windKt);
+
+  // Model-detected Atlantic lows, tagged with the storm they used to be
+  // (when they line up with an official track) and a UK threat band.
+  const lows = lowsRaw
+    ? {
+        ...lowsRaw,
+        lows: lowsRaw.lows.map((low) => ({
+          ...low,
+          exName: matchExStorm(low, assessed),
+          threat: lowThreatLabel(low),
+        })),
+      }
+    : null;
 
   // My-location closest approach for each storm.
   const local = place
@@ -78,6 +96,7 @@ export async function fetchStormPicture(timeoutMs = 20000, place = null) {
     wind,
     warnings,
     floods,
+    lows,
     local,
     errors,
     stormsOk: stormsRes.status === 'fulfilled',
@@ -170,6 +189,18 @@ export function evaluateAlerts(picture, settings, alerted, muted = {}, now = new
     }
   }
 
+  if (settings.windAlerts !== false) {
+    for (const low of picture.lows?.lows || []) {
+      if (low.closest.miles <= 300 && low.maxGust >= WINDSTORM_GUST_MPH) {
+        candidates.push({
+          key: `low:${low.closest.place}:${low.closest.point.time.toISOString().slice(0, 10)}`,
+          urgent: low.maxGust >= 70,
+          event: { type: 'low', low },
+        });
+      }
+    }
+  }
+
   if (settings.windAlerts && picture.wind) {
     for (const day of picture.wind.stormyDays || []) {
       if (day.gustMph >= WINDSTORM_GUST_MPH) {
@@ -211,6 +242,7 @@ export function summarise(picture) {
   const stormyDay = picture?.wind?.stormyDays?.[0] || null;
 
   const topWarning = picture?.warnings?.top || null;
+  const topLow = (picture?.lows?.lows || [])[0] || null;
   const floodCounts = picture?.floods?.counts || null;
 
   return {
@@ -220,6 +252,7 @@ export function summarise(picture) {
     stormyDay,
     count: assessed.length,
     topWarning,
+    topLow,
     stormName: picture?.warnings?.stormName || null,
     floodCounts,
   };
