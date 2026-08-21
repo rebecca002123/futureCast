@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppState,
+  Image,
   Linking,
   Platform,
   Pressable,
@@ -22,6 +23,7 @@ import {
   ktToMph,
   leadTimeLabel,
   OUTLOOK_GRAPHIC_URL,
+  OUTLOOK_IMAGE_URL,
   saffirSimpson,
   stormColor,
   timeAgoLabel,
@@ -632,13 +634,17 @@ export default function App() {
         ) : (
           areas.map((area) => <OutlookCard key={area.id} area={area} />)
         )}
-        {picture?.outlook?.issuedAt && (
-          <Pressable onPress={() => Linking.openURL(OUTLOOK_GRAPHIC_URL)}>
-            <Text style={styles.linkBtnText}>
-              NHC tropical weather outlook, issued {timeAgoLabel(picture.outlook.issuedAt, now)} — view the map ↗
-            </Text>
-          </Pressable>
-        )}
+        <Pressable style={styles.card} onPress={() => Linking.openURL(OUTLOOK_GRAPHIC_URL)}>
+          <Image
+            source={{ uri: `${OUTLOOK_IMAGE_URL}?h=${picture?.fetchedAt ? Math.floor(picture.fetchedAt.getTime() / 3600000) : 0}` }}
+            style={styles.nhcImage}
+            resizeMode="contain"
+          />
+          <Text style={styles.smallNote}>
+            The NHC's official 7-day outlook map — shaded areas are where forecasters expect development, with the
+            formation chance marked{picture?.outlook?.issuedAt ? ` (outlook issued ${timeAgoLabel(picture.outlook.issuedAt, now)})` : ''}. Tap to open on nhc.noaa.gov.
+          </Text>
+        </Pressable>
 
         <Text style={styles.sectionTitle}>UK wind outlook (16 days)</Text>
         {wind && wind.peak ? (
@@ -994,7 +1000,10 @@ function StormCard({ storm, risk, now, open, onToggle, muted }) {
           ) : null}
           {storm.conePngUrl ? (
             <Pressable onPress={() => Linking.openURL(storm.conePngUrl)}>
-              <Text style={styles.linkBtnText}>Official forecast cone graphic ↗</Text>
+              <Image source={{ uri: storm.conePngUrl }} style={styles.nhcImage} resizeMode="contain" />
+              <Text style={styles.smallNote}>
+                The NHC's official forecast cone for {storm.name} — tap to open full size.
+              </Text>
             </Pressable>
           ) : null}
         </View>
@@ -1269,6 +1278,7 @@ const styles = StyleSheet.create({
   mutedRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 },
 
   sourceLine: { color: '#c6ccd8', fontSize: 13, lineHeight: 22 },
+  nhcImage: { width: '100%', aspectRatio: 1.2, borderRadius: 8, backgroundColor: '#dfe6ee' },
 
   warningRow: { flexDirection: 'row', alignItems: 'flex-start', marginTop: 10 },
   warnPill: { borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3, marginRight: 10, marginTop: 1 },
