@@ -342,6 +342,24 @@ export default function App() {
         {MapView ? (
           <View style={styles.mapWrap}>
             <MapView style={styles.map} initialRegion={ATLANTIC_REGION} mapType="mutedStandard">
+              {(picture?.lows?.lows || []).map((low) => (
+                <React.Fragment key={low.id}>
+                  {Polyline && low.points.length > 1 && (
+                    <Polyline
+                      coordinates={low.points.map((p) => ({ latitude: p.lat, longitude: p.lon }))}
+                      strokeColor="#8899bb"
+                      strokeWidth={2}
+                      lineDashPattern={[4, 6]}
+                    />
+                  )}
+                  <Marker
+                    coordinate={{ latitude: low.current.lat, longitude: low.current.lon }}
+                    title={`${low.exName ? `Ex-${low.exName} · ` : ''}${low.minPressure} hPa low`}
+                    description={`Model estimate · gusts ${low.maxGust} mph · ${low.threat.label}`}
+                    pinColor="#8899bb"
+                  />
+                </React.Fragment>
+              ))}
               <Marker
                 coordinate={{ latitude: UK_CENTRE.lat, longitude: UK_CENTRE.lon }}
                 title="United Kingdom"
@@ -463,6 +481,55 @@ export default function App() {
             onToggle={() => setExpanded((p) => ({ ...p, [storm.id]: !p[storm.id] }))}
           />
         ))}
+
+        <Text style={styles.sectionTitle}>Atlantic lows radar</Text>
+        {picture?.lows?.gridOk ? (
+          picture.lows.lows.length ? (
+            <>
+              {picture.lows.lows.slice(0, 4).map((low) => (
+                <View key={low.id} style={styles.card}>
+                  <View style={styles.cardHeaderRow}>
+                    <Text style={styles.cardTitle}>
+                      {low.exName ? `Ex-${low.exName} · ` : ''}
+                      {low.minPressure} hPa low
+                      {low.startsInFuture ? ' (forecast to form)' : ''}
+                    </Text>
+                    <View style={[styles.ratingPill, { backgroundColor: low.threat.color }]}>
+                      <Text style={styles.ratingText}>{low.threat.label}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.cardBody}>
+                    {fmtLatLon(low.current.lat, low.current.lon)}
+                    {low.headingLabel ? ` · moving ${low.headingLabel}${low.speedMph ? ` at ${low.speedMph} mph` : ''}` : ' · slow-moving'}
+                    {` · gusts near the centre up to ${low.maxGust} mph`}
+                  </Text>
+                  <Text style={styles.cardBody}>
+                    Closest to the UK: ~{Math.round(low.closest.miles).toLocaleString()} miles from {low.closest.place}{' '}
+                    {leadTimeLabel(low.closest.point.time, now)}
+                  </Text>
+                </View>
+              ))}
+              <Text style={styles.smallNote}>
+                Every deep low the global weather model sees in the North Atlantic over the next 7 days — including
+                ex-hurricanes after the NHC stops tracking them, and ordinary windstorms that were never tropical.
+                Positions are model estimates on a coarse grid, not official advisories.
+              </Text>
+            </>
+          ) : (
+            <View style={styles.card}>
+              <Text style={styles.cardBody}>
+                ✅ No deep low-pressure systems in the North Atlantic forecast for the next 7 days.
+              </Text>
+              <Text style={styles.smallNote}>
+                This scan catches ex-hurricanes after the NHC stops advising on them, plus non-tropical windstorms.
+              </Text>
+            </View>
+          )
+        ) : (
+          <View style={styles.card}>
+            <Text style={styles.cardBody}>Atlantic lows scan unavailable — pull down to retry.</Text>
+          </View>
+        )}
 
         <Text style={styles.sectionTitle}>Risk for my location</Text>
         <View style={styles.card}>
@@ -807,6 +874,7 @@ export default function App() {
           <SourceLine ok={!!wind} label="Open-Meteo — 16-day UK wind and gust forecast" />
           <SourceLine ok={!!picture?.warnings} label="MeteoAlarm — official Met Office weather warnings" />
           <SourceLine ok={!!picture?.floods} label="Environment Agency — live flood warnings (England)" />
+          <SourceLine ok={!!picture?.lows?.gridOk} label="Open-Meteo grid scan — deep Atlantic lows & ex-hurricanes" />
           {picture?.errors?.length ? (
             <Text style={styles.smallNote}>Last refresh issues: {picture.errors.slice(0, 3).join(' · ')}</Text>
           ) : null}

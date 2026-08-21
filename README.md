@@ -40,6 +40,12 @@ to the question that actually matters here — **is any of it coming for us?**
   1991–2020 average for the date, days to the 10 September climatological
   peak, a running log of every storm the app has tracked this season, and
   the ex-hurricanes that actually reached the UK before.
+- **Atlantic lows radar** — a model-grid scan of the whole North Atlantic
+  that finds every deep low in the 7-day forecast and follows it: crucially,
+  this keeps tracking an **ex-hurricane after the NHC stops advising on it**
+  (the exact phase in which one threatens the UK), links it back to the
+  named storm it used to be ("Ex-Fiona"), and catches non-tropical
+  windstorms too. Labelled as model estimates throughout.
 - **Alerts** — notifications when a storm's UK risk reaches your chosen level
   (Watch / Elevated / High), when a new named storm forms or an area is likely
   to develop, and when gales appear in the UK forecast. Storms at Elevated or
@@ -92,6 +98,7 @@ on the App ID as part of the build. Widgets never appear in Expo Go.
 | [Open-Meteo](https://open-meteo.com/) | 16-day UK wind and gust forecast | Free, no API key |
 | [MeteoAlarm](https://meteoalarm.org/) | Official Met Office weather warnings | Keyless ATOM feed |
 | [Environment Agency](https://environment.data.gov.uk/flood-monitoring/doc/reference) | Live flood warnings | England only, keyless |
+| Open-Meteo grid scan | Deep Atlantic lows / ex-hurricane tracking | 50-point pressure grid, 7 days |
 
 Honest limitations, shown in-app too:
 

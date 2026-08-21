@@ -165,6 +165,18 @@ export function sendFloodNotification(flood) {
   });
 }
 
+export function sendLowNotification(low) {
+  const name = low.exName ? `Ex-${low.exName}` : 'A deep Atlantic low';
+  return notify({
+    title: `🌀 ${name} is heading our way`,
+    body:
+      `Models take it within about ${Math.round(low.closest.miles)} miles of ${low.closest.place}, ` +
+      `with gusts near ${low.maxGust} mph around the centre. Model estimate — check Met Office warnings.`,
+    urgent: low.maxGust >= 70,
+    data: { type: 'low', id: low.id },
+  });
+}
+
 // Fired from the settings screen so alerts can be proved to work without
 // waiting for a hurricane.
 export function sendTestNotification(picture) {
