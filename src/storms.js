@@ -19,6 +19,8 @@ const NHC_BASE = 'https://www.nhc.noaa.gov';
 export const CURRENT_STORMS_URL = `${NHC_BASE}/CurrentStorms.json`;
 export const OUTLOOK_URL = `${NHC_BASE}/xml/TWOAT.xml`;
 export const OUTLOOK_GRAPHIC_URL = `${NHC_BASE}/gtwo.php?basin=atlc&fdays=7`;
+// The NHC's 7-day graphical outlook image itself (updated 4x daily).
+export const OUTLOOK_IMAGE_URL = `${NHC_BASE}/xgtwo/two_atl_7d0.png`;
 
 export const KM_PER_MILE = 1.609344;
 export const MPH_PER_KNOT = 1.15078;
