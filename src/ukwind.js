@@ -110,3 +110,48 @@ export async function fetchUKWindOutlook(timeoutMs = 20000) {
     fetchedAt: new Date(),
   };
 }
+
+// 16-day outlook for one chosen place (the "my location" feature). Same feed
+// and shape as the UK-wide sweep, but a single point.
+export async function fetchPlaceWindOutlook(lat, lon, timeoutMs = 20000) {
+  const url =
+    `${OPEN_METEO}?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}` +
+    '&daily=wind_gusts_10m_max,wind_speed_10m_max,wind_direction_10m_dominant,precipitation_sum' +
+    '&wind_speed_unit=mph&timezone=Europe%2FLondon&forecast_days=16';
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let json;
+  try {
+    const res = await fetch(url, { signal: controller.signal, headers: { Accept: 'application/json' } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    json = await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const loc = Array.isArray(json) ? json[0] : json;
+  const daily = loc?.daily || {};
+  const days = (daily.time || [])
+    .map((iso, i) => {
+      const gust = daily.wind_gusts_10m_max?.[i];
+      if (!isFinite(gust)) return null;
+      return {
+        dateISO: iso,
+        date: new Date(`${iso}T12:00:00Z`),
+        gustMph: gust,
+        windMph: isFinite(daily.wind_speed_10m_max?.[i]) ? daily.wind_speed_10m_max[i] : null,
+        rainMm: isFinite(daily.precipitation_sum?.[i]) ? daily.precipitation_sum[i] : null,
+        band: windBand(gust),
+      };
+    })
+    .filter(Boolean);
+
+  const peak = days.reduce((a, b) => (!a || b.gustMph > a.gustMph ? b : a), null);
+  return {
+    days,
+    peak,
+    stormyDays: days.filter((d) => d.gustMph >= WINDSTORM_GUST_MPH),
+    fetchedAt: new Date(),
+  };
+}

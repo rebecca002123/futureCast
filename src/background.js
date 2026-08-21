@@ -9,11 +9,14 @@ import * as BackgroundTask from 'expo-background-task';
 import * as TaskManager from 'expo-task-manager';
 
 import {
+  sendFloodNotification,
   sendFormationNotification,
   sendNewStormNotification,
   sendRiskNotification,
+  sendWarningNotification,
   sendWindNotification,
 } from './notify';
+import { loadSeasonLog, updateSeasonLog } from './season';
 import { loadAlerted, loadMuted, loadSettings, saveAlerted, saveSnapshot } from './storage';
 import { evaluateAlerts, fetchStormPicture } from './watch';
 import { updateWidget } from './widget';
@@ -27,10 +30,11 @@ const BACKGROUND_TIMEOUT_MS = 12000;
 export async function runStormCheck(timeoutMs = BACKGROUND_TIMEOUT_MS) {
   const settings = await loadSettings();
 
-  const picture = await fetchStormPicture(timeoutMs);
+  const picture = await fetchStormPicture(timeoutMs, settings.place || null);
   if (!picture.stormsOk && !picture.wind) return { failed: true };
 
   await saveSnapshot(snapshotOf(picture));
+  loadSeasonLog().then((log) => updateSeasonLog(log, picture.assessed));
   // Refresh the Home Screen widget even when notifications are off — a widget
   // showing yesterday's storm is worse than no widget.
   updateWidget(picture);
@@ -48,7 +52,7 @@ export async function runStormCheck(timeoutMs = BACKGROUND_TIMEOUT_MS) {
 }
 
 function pickMostImportant(events) {
-  const order = { risk: 0, 'new-storm': 1, formation: 2, wind: 3 };
+  const order = { warning: 0, flood: 1, risk: 2, 'new-storm': 3, formation: 4, wind: 5 };
   return [...events].sort((a, b) => {
     const byType = (order[a.type] ?? 9) - (order[b.type] ?? 9);
     if (byType !== 0) return byType;
@@ -66,6 +70,10 @@ export async function notifyFor(event) {
       return sendFormationNotification(event.area);
     case 'wind':
       return sendWindNotification(event.day);
+    case 'warning':
+      return sendWarningNotification(event.warning, event.stormName);
+    case 'flood':
+      return sendFloodNotification(event.flood);
     default:
       return null;
   }
@@ -88,6 +96,9 @@ export function snapshotOf(picture) {
     })),
     peakGustMph: picture.wind?.peak?.gustMph ?? null,
     peakGustDate: picture.wind?.peak?.dateISO ?? null,
+    topWarning: picture.warnings?.top
+      ? { level: picture.warnings.top.level, type: picture.warnings.top.type, area: picture.warnings.top.area }
+      : null,
   };
 }
 

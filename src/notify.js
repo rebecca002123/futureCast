@@ -146,6 +146,25 @@ export function sendWindNotification(day) {
   });
 }
 
+export function sendWarningNotification(warning, stormName) {
+  const named = stormName ? ` (Storm ${stormName})` : '';
+  return notify({
+    title: `⚠️ ${warning.level} warning: ${warning.type.toLowerCase()}${named}`,
+    body: `The Met Office has a ${warning.level.toLowerCase()} ${warning.type.toLowerCase()} warning for ${warning.area}. Check metoffice.gov.uk for details and timing.`,
+    urgent: warning.rank >= 2, // amber and red break through Focus
+    data: { type: 'warning', id: warning.id },
+  });
+}
+
+export function sendFloodNotification(flood) {
+  return notify({
+    title: flood.severityLevel === 1 ? '🚨 Severe flood warning' : '🌊 Flood warning',
+    body: `${flood.label} for ${flood.area}. Check gov.uk/check-flooding for what to do.`,
+    urgent: flood.severityLevel === 1,
+    data: { type: 'flood', id: flood.id },
+  });
+}
+
 // Fired from the settings screen so alerts can be proved to work without
 // waiting for a hurricane.
 export function sendTestNotification(picture) {

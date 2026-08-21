@@ -4,19 +4,26 @@
 // telling the user about.
 
 import { fetchActiveStorms, fetchForecastTrack, fetchOutlook } from './storms';
-import { assessUKRisk, bandRank } from './ukrisk';
-import { fetchUKWindOutlook, WINDSTORM_GUST_MPH } from './ukwind';
+import { assessUKRisk, bandRank, closestToPlace } from './ukrisk';
+import { fetchPlaceWindOutlook, fetchUKWindOutlook, WINDSTORM_GUST_MPH } from './ukwind';
+import { fetchUKWarnings } from './ukwarnings';
+import { fetchFloods } from './floods';
 
 // Pull everything, tolerating individual failures — a missing outlook
-// shouldn't hide the storms, and vice versa.
-export async function fetchStormPicture(timeoutMs = 20000) {
+// shouldn't hide the storms, and vice versa. `place` ({name, lat, lon} or
+// null) adds the my-location wind outlook.
+export async function fetchStormPicture(timeoutMs = 20000, place = null) {
   const errors = [];
 
-  const [stormsRes, outlookRes, windRes] = await Promise.allSettled([
-    fetchActiveStorms(timeoutMs),
-    fetchOutlook(timeoutMs),
-    fetchUKWindOutlook(timeoutMs),
-  ]);
+  const [stormsRes, outlookRes, windRes, warningsRes, floodsRes, placeWindRes] =
+    await Promise.allSettled([
+      fetchActiveStorms(timeoutMs),
+      fetchOutlook(timeoutMs),
+      fetchUKWindOutlook(timeoutMs),
+      fetchUKWarnings(timeoutMs),
+      fetchFloods(timeoutMs),
+      place ? fetchPlaceWindOutlook(place.lat, place.lon, timeoutMs) : Promise.resolve(null),
+    ]);
 
   const storms = stormsRes.status === 'fulfilled' ? stormsRes.value : [];
   if (stormsRes.status !== 'fulfilled') errors.push(`Storm list: ${errString(stormsRes.reason)}`);
@@ -26,6 +33,16 @@ export async function fetchStormPicture(timeoutMs = 20000) {
 
   const wind = windRes.status === 'fulfilled' ? windRes.value : null;
   if (windRes.status !== 'fulfilled') errors.push(`UK wind outlook: ${errString(windRes.reason)}`);
+
+  const warnings = warningsRes.status === 'fulfilled' ? warningsRes.value : null;
+  if (warningsRes.status !== 'fulfilled') errors.push(`UK warnings: ${errString(warningsRes.reason)}`);
+
+  const floods = floodsRes.status === 'fulfilled' ? floodsRes.value : null;
+  if (floodsRes.status !== 'fulfilled') errors.push(`Flood warnings: ${errString(floodsRes.reason)}`);
+
+  const placeWind = placeWindRes.status === 'fulfilled' ? placeWindRes.value : null;
+  if (place && placeWindRes.status !== 'fulfilled')
+    errors.push(`${place.name} wind outlook: ${errString(placeWindRes.reason)}`);
 
   // Forecast tracks, one advisory per storm, fetched together.
   const trackResults = await Promise.allSettled(
@@ -43,10 +60,25 @@ export async function fetchStormPicture(timeoutMs = 20000) {
 
   assessed.sort((a, b) => b.risk.score - a.risk.score || b.storm.windKt - a.storm.windKt);
 
+  // My-location closest approach for each storm.
+  const local = place
+    ? {
+        place,
+        wind: placeWind,
+        storms: assessed
+          .map(({ storm, risk }) => ({ storm, risk, closest: closestToPlace(risk, place) }))
+          .filter((x) => x.closest)
+          .sort((a, b) => a.closest.miles - b.closest.miles),
+      }
+    : null;
+
   return {
     assessed,
     outlook,
     wind,
+    warnings,
+    floods,
+    local,
     errors,
     stormsOk: stormsRes.status === 'fulfilled',
     fetchedAt: now,
@@ -114,6 +146,30 @@ export function evaluateAlerts(picture, settings, alerted, muted = {}, now = new
     }
   }
 
+  if (settings.warningAlerts !== false) {
+    for (const warning of picture.warnings?.warnings || []) {
+      if (warning.rank >= 2) {
+        candidates.push({
+          key: `warn:${warning.id}`,
+          urgent: true, // amber and red are worth breaking through for
+          event: { type: 'warning', warning, stormName: picture.warnings?.stormName || null },
+        });
+      }
+    }
+  }
+
+  if (settings.floodAlerts !== false) {
+    for (const flood of picture.floods?.floods || []) {
+      if (flood.severityLevel <= 2) {
+        candidates.push({
+          key: `flood:${flood.id}:${flood.severityLevel}`,
+          urgent: flood.severityLevel === 1,
+          event: { type: 'flood', flood },
+        });
+      }
+    }
+  }
+
   if (settings.windAlerts && picture.wind) {
     for (const day of picture.wind.stormyDays || []) {
       if (day.gustMph >= WINDSTORM_GUST_MPH) {
@@ -154,5 +210,17 @@ export function summarise(picture) {
   ).length;
   const stormyDay = picture?.wind?.stormyDays?.[0] || null;
 
-  return { top, hurricanes, forming, stormyDay, count: assessed.length };
+  const topWarning = picture?.warnings?.top || null;
+  const floodCounts = picture?.floods?.counts || null;
+
+  return {
+    top,
+    hurricanes,
+    forming,
+    stormyDay,
+    count: assessed.length,
+    topWarning,
+    stormName: picture?.warnings?.stormName || null,
+    floodCounts,
+  };
 }
