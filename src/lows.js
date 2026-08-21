@@ -29,6 +29,14 @@ const MAX_CENTER_HPA = 1004;
 const MIN_TRACK_POINTS = 3;
 const DEEP_HPA = 988;
 
+function timeStrideHours(times) {
+  if (times.length < 2) return 1;
+  const a = new Date(times[0] + (times[0].includes('Z') ? '' : ':00Z'));
+  const b = new Date(times[1] + (times[1].includes('Z') ? '' : ':00Z'));
+  const h = Math.round((b - a) / 3600000);
+  return h > 0 ? h : 1;
+}
+
 export async function fetchAtlanticLows(timeoutMs = 25000) {
   const lats = [];
   const lons = [];
@@ -41,7 +49,7 @@ export async function fetchAtlanticLows(timeoutMs = 25000) {
   const url =
     `${OPEN_METEO}?latitude=${lats.join(',')}&longitude=${lons.join(',')}` +
     '&hourly=pressure_msl,wind_gusts_10m&wind_speed_unit=mph' +
-    '&timezone=UTC&forecast_days=7';
+    '&temporal_resolution=hourly_6&timezone=UTC&forecast_days=7';
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -68,9 +76,13 @@ export function detectLows(locations, now = new Date()) {
   const pressureAt = (row, col, t) => locations[row * nLon + col]?.hourly?.pressure_msl?.[t];
   const gustAt = (row, col, t) => locations[row * nLon + col]?.hourly?.wind_gusts_10m?.[t];
 
+  // The feed is requested at 6-hourly resolution, so consecutive entries are
+  // one detection step apart; timestamps are still read from the data.
+  const stride = timeStrideHours(times) >= STEP_HOURS ? 1 : STEP_HOURS;
+
   // Low centres per 6-hourly timestep: grid minima below the threshold.
   const fixesByStep = [];
-  for (let t = 0; t < times.length; t += STEP_HOURS) {
+  for (let t = 0; t < times.length; t += stride) {
     const time = new Date(`${times[t]}${times[t].includes('Z') || times[t].includes('+') ? '' : ':00Z'}`);
     const fixes = [];
     for (let r = 0; r < nLat; r++) {

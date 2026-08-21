@@ -1046,25 +1046,28 @@ function ChanceBar({ label, value }) {
 // The Windy-style wind radar. The page is self-contained (it fetches its own
 // wind grid), so the app only hands it the storm/low positions to overlay.
 function WindRadar({ assessed, lows }) {
-  const html = useMemo(() => {
-    const overlays = [
-      ...(assessed || []).map(({ storm }) => ({
-        lat: storm.lat,
-        lon: storm.lon,
-        label: storm.name,
-        kind: 'storm',
-      })),
-      ...((lows || [])
-        .filter((low) => !assessed?.some((a) => a.storm.name === low.exName))
-        .map((low) => ({
-          lat: low.current.lat,
-          lon: low.current.lon,
-          label: low.exName ? `Ex-${low.exName}` : `${low.minPressure} hPa`,
-          kind: 'low',
-        }))),
-    ];
-    return buildRadarHtml(overlays);
-  }, [assessed, lows]);
+  // Rebuild (and let the page refetch its wind grid) only when the overlay
+  // positions genuinely move — every rebuild reloads the WebView, and
+  // reloading on each 10-minute data refresh both flickers and burns through
+  // the weather API's rate limit.
+  const overlays = [
+    ...(assessed || []).map(({ storm }) => ({
+      lat: Math.round(storm.lat * 10) / 10,
+      lon: Math.round(storm.lon * 10) / 10,
+      label: storm.name,
+      kind: 'storm',
+    })),
+    ...((lows || [])
+      .filter((low) => !assessed?.some((a) => a.storm.name === low.exName))
+      .map((low) => ({
+        lat: low.current.lat,
+        lon: low.current.lon,
+        label: low.exName ? `Ex-${low.exName}` : `${low.minPressure} hPa`,
+        kind: 'low',
+      }))),
+  ];
+  const overlayKey = JSON.stringify(overlays);
+  const html = useMemo(() => buildRadarHtml(JSON.parse(overlayKey)), [overlayKey]);
 
   if (WebView) {
     return (
