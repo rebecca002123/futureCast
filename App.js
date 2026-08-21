@@ -75,7 +75,13 @@ if (Platform.OS !== 'web') {
   MapView = maps.default;
   Marker = maps.Marker;
   Polyline = maps.Polyline;
-  WebView = require('react-native-webview').WebView;
+  // Older installed builds don't contain the WebView native module — an OTA
+  // update must degrade gracefully there, never crash.
+  try {
+    WebView = require('react-native-webview').WebView;
+  } catch {
+    WebView = null;
+  }
 }
 
 const REFRESH_MS = 10 * 60 * 1000; // advisories are 6-hourly; re-check every 10 min
@@ -1074,14 +1080,25 @@ function WindRadar({ assessed, lows }) {
       </View>
     );
   }
-  // Web preview: same page in an iframe.
+  if (Platform.OS === 'web') {
+    // Web preview: same page in an iframe.
+    return (
+      <View style={styles.radarWrap}>
+        {React.createElement('iframe', {
+          srcDoc: html,
+          style: { border: 0, width: '100%', height: 460, borderRadius: 14, display: 'block' },
+          title: 'Wind radar',
+        })}
+      </View>
+    );
+  }
+  // Native build without the WebView module (an old binary running new JS).
   return (
-    <View style={styles.radarWrap}>
-      {React.createElement('iframe', {
-        srcDoc: html,
-        style: { border: 0, width: '100%', height: 460, borderRadius: 14, display: 'block' },
-        title: 'Wind radar',
-      })}
+    <View style={styles.card}>
+      <Text style={styles.cardBody}>
+        The wind radar needs a newer app build than this one. Everything else works — and the radar is available in
+        Expo Go and the next installed build.
+      </Text>
     </View>
   );
 }
