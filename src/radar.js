@@ -9,7 +9,7 @@
 
 import COASTLINES from './coastlines.json';
 
-export const RADAR_REGION = { latMin: 30, latMax: 66, lonMin: -46, lonMax: 8, step: 2 };
+export const RADAR_REGION = { latMin: 30, latMax: 66, lonMin: -46, lonMax: 8, step: 3 };
 
 export function buildRadarHtml(overlays = []) {
   const region = JSON.stringify(RADAR_REGION);
@@ -241,20 +241,52 @@ function coords() {
   return { lats: lats, lons: lons };
 }
 
+var loadTries = 0;
 function load() {
   var cs = coords();
-  var CHUNK = 76;
-  var reqs = [];
+  var CHUNK = 90;
+  var urls = [];
   for (var i = 0; i < cs.lats.length; i += CHUNK) {
-    var la = cs.lats.slice(i, i + CHUNK).join(',');
-    var lo = cs.lons.slice(i, i + CHUNK).join(',');
-    reqs.push(fetch('https://api.open-meteo.com/v1/forecast?latitude=' + la +
-      '&longitude=' + lo +
+    urls.push('https://api.open-meteo.com/v1/forecast?latitude=' + cs.lats.slice(i, i + CHUNK).join(',') +
+      '&longitude=' + cs.lons.slice(i, i + CHUNK).join(',') +
       '&hourly=wind_speed_10m,wind_direction_10m&wind_speed_unit=mph' +
-      '&temporal_resolution=hourly_6&forecast_days=4&timezone=UTC')
-      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }));
+      '&temporal_resolution=hourly_6&forecast_days=3&timezone=UTC');
   }
-  Promise.all(reqs).then(function (chunks) {
+  // Fetch chunks one at a time with a breather between them — the free API
+  // rate-limits bursts (HTTP 429), and a radar that queues politely always
+  // gets its data in the end.
+  var chunks = [];
+  function next(idx) {
+    if (idx >= urls.length) { assemble(chunks); return; }
+    fetch(urls[idx])
+      .then(function (r) {
+        if (r.status === 429) throw new Error('429');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (json) {
+        chunks.push(json);
+        setTimeout(function () { next(idx + 1); }, 350);
+      })
+      .catch(function (e) {
+        if (String(e.message) === '429' && loadTries < 4) {
+          loadTries++;
+          var wait = 20 * loadTries;
+          document.getElementById('status').textContent =
+            'Weather service is busy — retrying in ' + wait + 's…';
+          setTimeout(load, wait * 1000);
+        } else {
+          document.getElementById('status').textContent =
+            'Could not load the wind field (' + e.message + '). Pull down in the app to retry.';
+        }
+      });
+  }
+  next(0);
+}
+
+function assemble(chunkList) {
+  Promise.all([chunkList]).then(function (wrapped) {
+    var chunks = wrapped[0];
     var locs = [];
     chunks.forEach(function (ch) { locs = locs.concat(Array.isArray(ch) ? ch : [ch]); });
     times = locs[0].hourly.time;
@@ -281,7 +313,7 @@ function load() {
     setWhen();
   }).catch(function (e) {
     document.getElementById('status').textContent =
-      'Could not load the wind field (' + e.message + '). Pull down in the app to retry.';
+      'Could not read the wind field (' + e.message + '). Pull down in the app to retry.';
   });
 }
 
