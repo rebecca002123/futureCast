@@ -28,6 +28,7 @@ import {
 } from './src/storms';
 import { outlookWatchLevel, UK_CENTRE } from './src/ukrisk';
 import { searchTowns } from './src/places';
+import { buildRadarHtml } from './src/radar';
 import {
   climatologyToDate,
   daysToPeak,
@@ -63,15 +64,18 @@ import {
 import { notifyFor, registerBackgroundCheck, snapshotOf } from './src/background';
 import { updateWidget } from './src/widget';
 
-// react-native-maps is native-only; guard so `expo start --web` still runs.
+// react-native-maps and the WebView are native-only; guard so
+// `expo start --web` still runs (the radar falls back to an iframe there).
 let MapView = null;
 let Marker = null;
 let Polyline = null;
+let WebView = null;
 if (Platform.OS !== 'web') {
   const maps = require('react-native-maps');
   MapView = maps.default;
   Marker = maps.Marker;
   Polyline = maps.Polyline;
+  WebView = require('react-native-webview').WebView;
 }
 
 const REFRESH_MS = 10 * 60 * 1000; // advisories are 6-hourly; re-check every 10 min
@@ -404,6 +408,13 @@ export default function App() {
             <Text style={styles.cardBody}>The map is available on iOS/Android (open in Expo Go).</Text>
           </View>
         )}
+
+        <Text style={styles.sectionTitle}>Live wind radar</Text>
+        <WindRadar assessed={assessed} lows={picture?.lows?.lows} />
+        <Text style={styles.smallNote}>
+          Model wind for the next 4 days — drag the timeline to watch systems move, and touch the map to read the
+          wind speed anywhere. Colours are sustained wind in mph; the white streaks flow with the wind.
+        </Text>
 
         <View style={styles.statsRow}>
           <Stat label="Active systems" value={loading && !picture ? '…' : String(assessed.length)} />
@@ -1026,6 +1037,55 @@ function ChanceBar({ label, value }) {
   );
 }
 
+// The Windy-style wind radar. The page is self-contained (it fetches its own
+// wind grid), so the app only hands it the storm/low positions to overlay.
+function WindRadar({ assessed, lows }) {
+  const html = useMemo(() => {
+    const overlays = [
+      ...(assessed || []).map(({ storm }) => ({
+        lat: storm.lat,
+        lon: storm.lon,
+        label: storm.name,
+        kind: 'storm',
+      })),
+      ...((lows || [])
+        .filter((low) => !assessed?.some((a) => a.storm.name === low.exName))
+        .map((low) => ({
+          lat: low.current.lat,
+          lon: low.current.lon,
+          label: low.exName ? `Ex-${low.exName}` : `${low.minPressure} hPa`,
+          kind: 'low',
+        }))),
+    ];
+    return buildRadarHtml(overlays);
+  }, [assessed, lows]);
+
+  if (WebView) {
+    return (
+      <View style={styles.radarWrap}>
+        <WebView
+          originWhitelist={['*']}
+          source={{ html }}
+          style={styles.radar}
+          scrollEnabled={false}
+          overScrollMode="never"
+          setSupportMultipleWindows={false}
+        />
+      </View>
+    );
+  }
+  // Web preview: same page in an iframe.
+  return (
+    <View style={styles.radarWrap}>
+      {React.createElement('iframe', {
+        srcDoc: html,
+        style: { border: 0, width: '100%', height: 460, borderRadius: 14, display: 'block' },
+        title: 'Wind radar',
+      })}
+    </View>
+  );
+}
+
 function SeasonStats({ assessed, seasonLog, now }) {
   const count = seasonStormNumber(assessed, seasonLog);
   const avg = climatologyToDate(now);
@@ -1105,6 +1165,8 @@ const styles = StyleSheet.create({
   linkBtnText: { color: '#7db4ff', fontSize: 13, textDecorationLine: 'underline', marginTop: 10 },
 
   mapWrap: { marginTop: 14, borderRadius: 14, overflow: 'hidden' },
+  radarWrap: { borderRadius: 14, overflow: 'hidden', height: 460, backgroundColor: '#0e1420' },
+  radar: { flex: 1, backgroundColor: '#0e1420' },
   map: { width: '100%', height: 300 },
   legend: {
     position: 'absolute',
