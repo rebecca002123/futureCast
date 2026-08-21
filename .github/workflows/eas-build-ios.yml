@@ -1,0 +1,46 @@
+# On-demand iOS build via EAS, runnable without a terminal.
+#
+# Needs two repository secrets (Settings → Secrets and variables → Actions):
+#   EXPO_TOKEN — an expo.dev access token
+#   ASC_KEY    — the App Store Connect API key: the full text of the .p8
+#                file, from -----BEGIN PRIVATE KEY----- to the END line
+# The App Store Connect key lets EAS validate the distribution certificate
+# and create the app + widget provisioning profiles without an interactive
+# Apple sign-in.
+name: EAS iOS build
+on:
+  workflow_dispatch:
+    inputs:
+      asc_issuer_id:
+        description: App Store Connect Issuer ID
+        required: true
+      apple_team_id:
+        description: Apple Team ID (10 characters)
+        required: true
+      apple_team_type:
+        description: Apple team type
+        required: false
+        default: INDIVIDUAL
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Restore App Store Connect key
+        run: printf '%s\n' "$ASC_KEY" > "$RUNNER_TEMP/asc-key.p8"
+        env:
+          ASC_KEY: ${{ secrets.ASC_KEY }}
+      - name: Start EAS build
+        run: npx eas-cli@latest build --platform ios --profile production --non-interactive --no-wait
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_ASC_API_KEY_PATH: ${{ runner.temp }}/asc-key.p8
+          EXPO_ASC_KEY_ID: X3XZ97R5S3
+          EXPO_ASC_ISSUER_ID: ${{ inputs.asc_issuer_id }}
+          EXPO_APPLE_TEAM_ID: ${{ inputs.apple_team_id }}
+          EXPO_APPLE_TEAM_TYPE: ${{ inputs.apple_team_type }}
+          APPLE_TEAM_ID: ${{ inputs.apple_team_id }}
