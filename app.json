@@ -3,7 +3,7 @@
     "name": "Atlantic Storm Watch",
     "slug": "atlantic-storm-watch",
     "owner": "rebecca0021",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "icon": "./assets/icon.png",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
