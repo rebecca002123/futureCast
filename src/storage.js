@@ -1,37 +1,20 @@
+// Reading and writing the two things the app keeps: the shifts and the
+// settings. Everything lives on the phone in AsyncStorage — no account, no
+// server, no sync. Deleting the app deletes the lot.
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const SETTINGS_KEY = 'storms.settings.v1';
-const ALERTED_KEY = 'storms.alerted.v1';
-const SNAPSHOT_KEY = 'storms.snapshot.v1';
-const MUTED_KEY = 'storms.muted.v1';
+import { mergeSettings } from './settings';
 
-export const DEFAULT_SETTINGS = {
-  notificationsEnabled: true,
-  // Lowest UK risk band that triggers an alert: 'Watch' | 'Elevated' | 'High'
-  alertBand: 'Watch',
-  // Alert when a new named Atlantic storm forms, or an area of disturbed
-  // weather reaches a high chance of developing.
-  formationAlerts: true,
-  // Alert when the UK 16-day forecast picks up a gale/storm-force day.
-  windAlerts: true,
-  // Alert on new amber/red official weather warnings.
-  warningAlerts: true,
-  // Alert on new severe flood warnings / flood warnings (England).
-  floodAlerts: true,
-  // Chosen "my location" town ({name, lat, lon}) or null for UK-wide only.
-  place: null,
-  // Hold non-urgent alerts overnight (23:00–07:00). A storm at High risk
-  // still comes through — that's the whole point of the app.
-  quietHours: true,
-};
+const SHIFTS_KEY = 'shiftpay.shifts.v1';
+const SETTINGS_KEY = 'shiftpay.settings.v1';
 
 export async function loadSettings() {
   try {
     const raw = await AsyncStorage.getItem(SETTINGS_KEY);
-    const stored = raw ? JSON.parse(raw) : {};
-    return { ...DEFAULT_SETTINGS, ...stored };
+    return mergeSettings(raw ? JSON.parse(raw) : null);
   } catch {
-    return { ...DEFAULT_SETTINGS };
+    return mergeSettings(null);
   }
 }
 
@@ -39,94 +22,24 @@ export async function saveSettings(settings) {
   try {
     await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   } catch {
-    // non-fatal
+    // Non-fatal: the in-memory settings still apply for this session.
   }
 }
 
-// Keys we've already notified about (a storm reaching a risk band, a new
-// named storm, a windy day appearing in the outlook), so alerts don't repeat
-// on every refresh. Entries expire after 10 days — longer than any storm's
-// life, short enough that next season starts clean.
-export async function loadAlerted() {
+export async function loadShifts() {
   try {
-    const raw = await AsyncStorage.getItem(ALERTED_KEY);
-    const map = raw ? JSON.parse(raw) : {};
-    const cutoff = Date.now() - 10 * 24 * 3600000;
-    const fresh = {};
-    for (const [id, ts] of Object.entries(map)) {
-      if (ts > cutoff) fresh[id] = ts;
-    }
-    return fresh;
+    const raw = await AsyncStorage.getItem(SHIFTS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((shift) => shift && shift.id && shift.date) : [];
   } catch {
-    return {};
+    return [];
   }
 }
 
-export async function saveAlerted(map) {
+export async function saveShifts(shifts) {
   try {
-    await AsyncStorage.setItem(ALERTED_KEY, JSON.stringify(map));
+    await AsyncStorage.setItem(SHIFTS_KEY, JSON.stringify(shifts));
   } catch {
-    // non-fatal
-  }
-}
-
-// Last successful fetch, so the app opens showing the previous picture (and
-// says how old it is) instead of an empty screen when offline.
-export async function saveSnapshot(snapshot) {
-  try {
-    await AsyncStorage.setItem(SNAPSHOT_KEY, JSON.stringify({ ...snapshot, savedAt: Date.now() }));
-  } catch {
-    // non-fatal
-  }
-}
-
-export async function loadSnapshot() {
-  try {
-    const raw = await AsyncStorage.getItem(SNAPSHOT_KEY);
-    if (!raw) return null;
-    const snap = JSON.parse(raw);
-    // Anything older than a day is more misleading than useful.
-    if (!snap.savedAt || Date.now() - snap.savedAt > 24 * 3600000) return null;
-    return snap;
-  } catch {
-    return null;
-  }
-}
-
-// Storms the user has muted from a notification's "Mute for 24h" button.
-export async function loadMuted() {
-  try {
-    const raw = await AsyncStorage.getItem(MUTED_KEY);
-    const map = raw ? JSON.parse(raw) : {};
-    const now = Date.now();
-    const live = {};
-    for (const [id, until] of Object.entries(map)) {
-      if (until > now) live[id] = until;
-    }
-    return live;
-  } catch {
-    return {};
-  }
-}
-
-export async function muteStorm(stormId, hours = 24) {
-  try {
-    const muted = await loadMuted();
-    muted[stormId] = Date.now() + hours * 3600000;
-    await AsyncStorage.setItem(MUTED_KEY, JSON.stringify(muted));
-    return muted;
-  } catch {
-    return {};
-  }
-}
-
-export async function unmuteStorm(stormId) {
-  try {
-    const muted = await loadMuted();
-    delete muted[stormId];
-    await AsyncStorage.setItem(MUTED_KEY, JSON.stringify(muted));
-    return muted;
-  } catch {
-    return {};
+    // Non-fatal, but the next save may well work.
   }
 }

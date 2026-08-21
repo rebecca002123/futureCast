@@ -1,91 +1,107 @@
-// Draws the app icon (a hurricane swirl over the North Atlantic) into a raw
-// RGB buffer and writes it out as a PNG with Node's zlib — no image deps.
+// Draws the app icon — a coin with clock ticks and a pound sign — into a raw
+// RGB buffer and writes it out as a PNG with Node's zlib, no image deps.
+//   node tools/make-icon.mjs assets/icon.png
 import zlib from 'zlib';
 import fs from 'fs';
 
 const S = 1024;
 const buf = new Float64Array(S * S * 3);
 
+const MINT = [61, 220, 151];
+const MINT_DEEP = [26, 168, 116];
+const INK = [10, 17, 22];
+
 const mix = (a, b, t) => a + (b - a) * t;
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 
-function put(x, y, [r, g, b], alpha) {
+function put(x, y, colour, alpha) {
   if (alpha <= 0 || x < 0 || y < 0 || x >= S || y >= S) return;
   const i = (y * S + x) * 3;
-  buf[i] = mix(buf[i], r, alpha);
-  buf[i + 1] = mix(buf[i + 1], g, alpha);
-  buf[i + 2] = mix(buf[i + 2], b, alpha);
+  const a = clamp01(alpha);
+  buf[i] = mix(buf[i], colour[0], a);
+  buf[i + 1] = mix(buf[i + 1], colour[1], a);
+  buf[i + 2] = mix(buf[i + 2], colour[2], a);
 }
 
-// Background: deep ocean-night gradient.
+// A round brush with a one-pixel feathered edge: crisp at icon size, no
+// staircase on the curves.
+function stamp(x, y, radius, colour, alpha = 1) {
+  const r = Math.ceil(radius + 1);
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      const d = Math.hypot(dx, dy);
+      if (d > radius + 1) continue;
+      put(Math.round(x) + dx, Math.round(y) + dy, colour, clamp01(radius + 0.5 - d) * alpha);
+    }
+  }
+}
+
+function line(x0, y0, x1, y1, width, colour) {
+  const steps = Math.ceil(Math.hypot(x1 - x0, y1 - y0) * 2);
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    stamp(mix(x0, x1, t), mix(y0, y1, t), width / 2, colour);
+  }
+}
+
+function arc(cx, cy, radius, from, to, width, colour) {
+  const steps = Math.ceil(Math.abs(to - from) * radius * 2);
+  for (let i = 0; i <= steps; i++) {
+    const angle = mix(from, to, i / steps);
+    stamp(cx + radius * Math.cos(angle), cy + radius * Math.sin(angle), width / 2, colour);
+  }
+}
+
+function disc(cx, cy, radius, colour) {
+  for (let y = Math.floor(cy - radius - 1); y <= cy + radius + 1; y++) {
+    for (let x = Math.floor(cx - radius - 1); x <= cx + radius + 1; x++) {
+      put(x, y, colour, clamp01(radius + 0.5 - Math.hypot(x - cx, y - cy)));
+    }
+  }
+}
+
+// Background: near-black with a green cast towards the bottom right, so the
+// coin has something to sit on without a hard edge.
 for (let y = 0; y < S; y++) {
   for (let x = 0; x < S; x++) {
-    const t = clamp01((x / S) * 0.45 + (y / S) * 0.55);
-    const col = [mix(11, 26, t), mix(26, 58, t), mix(48, 92, t)];
+    const t = clamp01((x / S) * 0.4 + (y / S) * 0.6);
     const i = (y * S + x) * 3;
-    buf[i] = col[0];
-    buf[i + 1] = col[1];
-    buf[i + 2] = col[2];
+    buf[i] = mix(14, 12, t);
+    buf[i + 1] = mix(17, 38, t);
+    buf[i + 2] = mix(22, 30, t);
   }
 }
 
 const cx = S / 2;
 const cy = S / 2;
 
-// Four logarithmic spiral bands sweeping into the eye, drawn as fat
-// anti-aliased strokes with a soft glow.
-const ARMS = 4;
-const A = 26;      // spiral tightness
-const B = 0.30;
-const CLOUD = [236, 248, 255];
-const GLOW = [120, 200, 255];
+// The coin, with a slightly deeper rim so it reads as a disc rather than a
+// flat circle.
+disc(cx, cy, 372, MINT_DEEP);
+disc(cx, cy, 352, MINT);
 
-for (let arm = 0; arm < ARMS; arm++) {
-  const phase = (arm / ARMS) * Math.PI * 2;
-  for (let t = 0; t < 2400; t++) {
-    const th = (t / 2400) * (Math.PI * 3.15);
-    const r = A * Math.exp(B * th);
-    if (r > 430) break;
-    const ang = th + phase;
-    const px = cx + r * Math.cos(ang);
-    const py = cy + r * Math.sin(ang);
-    // Arms thicken and fade towards the outside.
-    const width = 9 + (r / 430) * 40;
-    const strength = clamp01(1.05 - (r / 430) * 0.45) * clamp01(r / 55);
-    const R = Math.ceil(width);
-    for (let dy = -R; dy <= R; dy++) {
-      for (let dx = -R; dx <= R; dx++) {
-        const d = Math.hypot(dx, dy);
-        if (d > width) continue;
-        // A hard core with a thin feathered edge keeps the arms crisp at
-        // icon size instead of smearing into fog.
-        const edge = clamp01((width - d) / Math.max(6, width * 0.28));
-        put(Math.round(px + dx), Math.round(py + dy), CLOUD, Math.pow(edge, 0.6) * 0.22 * strength);
-        put(Math.round(px + dx), Math.round(py + dy), GLOW, edge * 0.025 * strength);
-      }
-    }
-  }
+// Clock ticks around the rim: this is a coin that measures time.
+for (let hour = 0; hour < 12; hour++) {
+  const angle = (hour / 12) * Math.PI * 2 - Math.PI / 2;
+  const long = hour % 3 === 0;
+  const inner = long ? 268 : 288;
+  line(
+    cx + inner * Math.cos(angle),
+    cy + inner * Math.sin(angle),
+    cx + 318 * Math.cos(angle),
+    cy + 318 * Math.sin(angle),
+    long ? 26 : 16,
+    INK,
+  );
 }
 
-// The eye: a dark centre ringed by the brightest cloud.
-for (let y = 0; y < S; y++) {
-  for (let x = 0; x < S; x++) {
-    const d = Math.hypot(x - cx, y - cy);
-    if (d < 96) {
-      const ring = clamp01((d - 44) / 34);
-      put(x, y, [8, 20, 38], clamp01((96 - d) / 26) * (1 - ring * 0.35));
-      if (d > 52 && d < 92) put(x, y, CLOUD, clamp01(1 - Math.abs(d - 72) / 22) * 0.85);
-    }
-  }
-}
-
-// Vignette, so the swirl sits on the tile rather than floating.
-for (let y = 0; y < S; y++) {
-  for (let x = 0; x < S; x++) {
-    const d = Math.hypot(x - cx, y - cy) / (S / 2);
-    if (d > 0.72) put(x, y, [6, 14, 28], clamp01((d - 0.72) / 0.5) * 0.5);
-  }
-}
+// A pound sign, drawn from the four strokes it's actually made of: the top
+// bowl, the stem, the crossbar and the base.
+const stem = 36;
+arc(cx + 2, cy - 62, 85, Math.PI * 0.18, -Math.PI * 1.18, stem, INK); // top bowl
+line(cx - 83, cy - 62, cx - 83, cy + 96, stem, INK); // stem
+line(cx - 118, cy + 20, cx + 42, cy + 20, 28, INK); // crossbar
+line(cx - 118, cy + 96, cx + 117, cy + 96, stem, INK); // base
 
 // --- PNG encode (8-bit RGB, filter type 0 per scanline) ---
 const raw = Buffer.alloc(S * (S * 3 + 1));
@@ -94,15 +110,6 @@ for (let y = 0; y < S; y++) {
   for (let x = 0; x < S * 3; x++) {
     raw[y * (S * 3 + 1) + 1 + x] = Math.max(0, Math.min(255, Math.round(buf[y * S * 3 + x])));
   }
-}
-
-function chunk(type, data) {
-  const len = Buffer.alloc(4);
-  len.writeUInt32BE(data.length);
-  const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
-  const crc = Buffer.alloc(4);
-  crc.writeUInt32BE(zlib.crc32 ? zlib.crc32(body) >>> 0 : crc32(body) >>> 0);
-  return Buffer.concat([len, body, crc]);
 }
 
 let TABLE = null;
@@ -120,10 +127,20 @@ function crc32(b) {
   return (c ^ -1) >>> 0;
 }
 
+function chunk(type, data) {
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(data.length);
+  const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(body));
+  return Buffer.concat([len, body, crc]);
+}
+
 const ihdr = Buffer.alloc(13);
 ihdr.writeUInt32BE(S, 0);
 ihdr.writeUInt32BE(S, 4);
-ihdr[8] = 8; ihdr[9] = 2; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
+ihdr[8] = 8;
+ihdr[9] = 2;
 
 const png = Buffer.concat([
   Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
@@ -131,5 +148,7 @@ const png = Buffer.concat([
   chunk('IDAT', zlib.deflateSync(raw, { level: 9 })),
   chunk('IEND', Buffer.alloc(0)),
 ]);
-fs.writeFileSync(process.argv[2], png);
-console.log('wrote', process.argv[2], (png.length / 1024).toFixed(0) + ' KB');
+
+const out = process.argv[2] || 'assets/icon.png';
+fs.writeFileSync(out, png);
+console.log('wrote', out, `${(png.length / 1024).toFixed(0)} KB`);

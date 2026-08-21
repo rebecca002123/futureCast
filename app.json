@@ -1,51 +1,33 @@
 {
   "expo": {
-    "name": "Atlantic Storm Watch",
-    "slug": "atlantic-storm-watch",
+    "name": "Shift Pay",
+    "slug": "shift-pay",
     "owner": "rebecca0021",
     "version": "1.0.0",
     "icon": "./assets/icon.png",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
-    "backgroundColor": "#0e1420",
+    "backgroundColor": "#0e1116",
     "splash": {
-      "backgroundColor": "#0e1420"
+      "backgroundColor": "#0e1116"
     },
     "ios": {
-      "bundleIdentifier": "com.atlanticstormwatch.app",
+      "bundleIdentifier": "com.shiftpay.app",
       "supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
-      },
-      "entitlements": {
-        "com.apple.security.application-groups": [
-          "group.com.atlanticstormwatch.app"
-        ],
-        "com.apple.developer.usernotifications.time-sensitive": true
       }
     },
     "android": {
-      "package": "com.atlanticstormwatch.app",
+      "package": "com.shiftpay.app",
       "permissions": []
     },
     "web": {
       "bundler": "metro"
     },
-    "plugins": [
-      "expo-background-task",
-      "@bacons/apple-targets"
-    ],
     "runtimeVersion": {
       "policy": "sdkVersion"
     },
-    "scheme": "stormwatch",
-    "updates": {
-      "url": "https://u.expo.dev/a68f1986-5c21-47ed-9f00-6c52e81d41dc"
-    },
-    "extra": {
-      "eas": {
-        "projectId": "a68f1986-5c21-47ed-9f00-6c52e81d41dc"
-      }
-    }
+    "scheme": "shiftpay"
   }
 }

@@ -1,210 +1,138 @@
-# Atlantic Storm Watch 🌀🇬🇧
+# Shift Pay 💷🕘
 
-Live Atlantic hurricane tracking with a UK slant, built with
-[Expo](https://expo.dev) / React Native: every storm the National Hurricane
-Center is advising on, everything that might still form, and an honest answer
-to the question that actually matters here — **is any of it coming for us?**
+Log the shifts you work, and know what you're owed before the payslip turns
+up. Built with [Expo](https://expo.dev) / React Native, works entirely
+offline, and shows its working for every penny.
 
 ## What it does
 
-- **Every active Atlantic storm** — positions, category, sustained winds
-  (mph), central pressure and movement, straight from the NHC's live feed,
-  with the distance from the UK.
-- **Official forecast tracks** — each storm's NHC Forecast/Advisory is parsed
-  into its 5-day track and drawn on the map (solid line), with the forecast
-  intensity at each point.
-- **UK risk score** — the app extends the official track along the heading and
-  speed of its final leg (dashed line: the app's own extrapolation, *not* an
-  NHC forecast), finds the closest that path comes to the UK and when, and
-  scores it against how well the storm is aimed at us, whether it's recurving
-  north-east, and how strong it is. Tap any storm to see exactly how the score
-  was worked out.
-- **Formation watch** — the NHC Tropical Weather Outlook: areas of disturbed
-  weather with their 2-day and 7-day chances of developing, and a note on
-  whether they're in the part of the Atlantic that can send systems our way.
-- **UK wind outlook** — 16 days of maximum forecast gusts across nine UK
-  locations from the Open-Meteo global model. This is where an ex-hurricane
-  actually shows up for us: once a storm is being dragged across the Atlantic,
-  the models put the wind into this chart days before it arrives.
-- **Official UK weather warnings** — the Met Office's live yellow/amber/red
-  warnings (via MeteoAlarm's keyless feed), including the storm's name when
-  one is named ("Storm Floris"). Red and amber warnings take over the top
-  banner and arrive as time-sensitive notifications.
-- **Risk for my location** — pick your town (no GPS permission needed; ~100
-  UK & Irish towns bundled) and the app shows how close each storm's track
-  passes to *you*, when, and your own 16-day gust outlook.
-- **Flood warnings** — live Environment Agency flood alerts and warnings
-  (England only — Wales and Scotland publish separately), with severe flood
-  warnings as urgent notifications.
-- **Season context** — how many systems this season has produced versus the
-  1991–2020 average for the date, days to the 10 September climatological
-  peak, a running log of every storm the app has tracked this season, and
-  the ex-hurricanes that actually reached the UK before.
-- **Atlantic lows radar** — a model-grid scan of the whole North Atlantic
-  that finds every deep low in the 7-day forecast and follows it: crucially,
-  this keeps tracking an **ex-hurricane after the NHC stops advising on it**
-  (the exact phase in which one threatens the UK), links it back to the
-  named storm it used to be ("Ex-Fiona"), and catches non-tropical
-  windstorms too. Labelled as model estimates throughout.
-- **Alerts** — notifications when a storm's UK risk reaches your chosen level
-  (Watch / Elevated / High), when a new named storm forms or an area is likely
-  to develop, and when gales appear in the UK forecast. Storms at Elevated or
-  High risk arrive as **time-sensitive** notifications that break through Focus
-  modes; everything else is a normal alert, and routine alerts are held
-  overnight (23:00–07:00) unless they're urgent. Each storm alert carries a
-  **Mute for 24h** button for a system that sits over the Atlantic for a week.
-  There's a **Send a test notification** button in Alerts so you can prove it
-  all works without waiting for a hurricane.
-- **Home Screen and Lock Screen widgets** — a WidgetKit extension showing the
-  highest UK risk at a glance. Small: the risk band and the storm behind it.
-  Medium: adds the closest approach and the next windy UK day. Lock Screen:
-  circular, rectangular and inline versions. Requires a real build — see below.
+- **Add a shift in about five seconds** — date, start, finish, unpaid break.
+  Times are typed the way people say them (`7`, `19:30`, `7.30pm`, `0930`) or
+  nudged in quarter hours with the arrows, and a shift that finishes after
+  midnight is understood as a night shift rather than a negative one.
+- **Pay worked out to the minute**, not the nearest hour: the paid time is
+  the shift minus the unpaid break, and every minute is priced at the rate
+  that actually applies to it.
+- **Night and weekend premiums** — an extra amount per hour or a multiple of
+  your rate, applied only to the hours inside the window. A 20:00–06:30 shift
+  is split exactly where the night rate starts and stops. Premiums don't
+  stack: if an hour is both night and weekend, the better-paid one applies.
+- **Overtime**, daily (past *n* hours in one shift) and weekly (past *n*
+  hours in the week, counted across every job), at whatever multiple your
+  employer uses. Overtime multiplies whatever the hour was already worth, so
+  a night hour in overtime pays the night rate × 1.5.
+- **More than one job**, each with its own rate and colour, plus a one-off
+  rate override for the odd cover shift paid differently.
+- **Your pay period, not the calendar's** — weekly or fortnightly from
+  whichever weekday your week starts on, or monthly from any day of the month
+  (payrolls that run the 21st to the 20th are normal, and supported).
+- **A take-home estimate** — income tax, National Insurance, a workplace
+  pension and a student loan, using 2025/26 rates for the rest of the UK or
+  for Scotland.
+- **Holiday building up** at 12.07% of the hours you work — the standard
+  accrual for hourly work — valued at what those hours actually paid.
+- **Every figure explained.** Tap a shift and it shows the bands it was split
+  into, the hours in each, the rate each was paid at and where that rate came
+  from. Nothing is a black box you have to trust.
+- **Share it** — a plain-text summary of the period, or a CSV of every shift,
+  straight out of the share sheet.
+- **Tax year to date** — gross, hours and overtime since 6 April.
 
-## Widgets
+## What it deliberately doesn't do
 
-The widget lives in `targets/storm-widget` (SwiftUI + WidgetKit) and is built
-into the app by [`@bacons/apple-targets`](https://github.com/EvanBacon/expo-apple-targets).
+It has no accounts, no servers and no network access at all: your shifts live
+in the app's own storage on your phone and nowhere else. Nothing is uploaded,
+because there's nowhere to upload it to.
 
-It can't run the app's JavaScript, so the app writes a small JSON snapshot into
-a shared **App Group** (`group.com.eclipselookout.app`) after every refresh —
-foreground *and* the background checks while the app is closed — and then asks
-WidgetKit to reload. The widget renders that snapshot and shows how old it is,
-so a stale widget is obvious rather than misleading.
+It also isn't payroll. Your employer's rounding rules, salary sacrifice, an
+unusual tax code, a mid-period pay rise or a cumulative PAYE calculation
+across the whole tax year will all move the real number. The take-home figure
+is worked out on one pay period in isolation, which is what a "week 1 /
+month 1" payslip does — over a year of uneven weeks it will drift. Use the
+app to check a payslip and to spot when one is wrong, not to replace one.
 
-To build it:
+## How the pay is worked out
 
-1. **Set your Apple Team ID.** Either export `APPLE_TEAM_ID=XXXXXXXXXX` (as an
-   EAS environment variable for cloud builds, or in your shell before
-   `npx expo prebuild`), or paste it into `app.json` under
-   `expo.ios.appleTeamId`. Find it in Xcode → Signing & Capabilities, or on
-   [developer.apple.com](https://developer.apple.com/account) under Membership.
-   Without it the app still builds, but the widget target won't sign.
-2. **Make a new native build** — `eas build` (or `npx expo prebuild -p ios &&
-   npx expo run:ios`). The widget is native code, so an over-the-air update
-   *cannot* deliver it: merging to `main` publishes JS only.
-3. On the phone: long-press the Home Screen → **+** → search for **Storm
-   Watch**. For the Lock Screen: Customise → the widget slot under the clock.
+In `src/pay.js`, for each shift:
 
-EAS Build creates the App Group and the time-sensitive notification capability
-on the App ID as part of the build. Widgets never appear in Expo Go.
+1. Turn the two wall-clock times into a span of minutes, adding a day if the
+   finish is earlier than the start.
+2. Walk that span a minute at a time and label each minute with the premium
+   that applies to it (basic, night, weekend — the best-paid one wins),
+   collecting the result into runs of equal-rate minutes.
+3. Take the unpaid break off, in proportion to how much of the shift each
+   band covers: a 30-minute break on a half-night shift takes 15 minutes off
+   each side.
+4. Split the runs again wherever an overtime threshold falls — daily
+   thresholds count from the start of the shift, weekly ones from the start
+   of the overtime week across every shift and every job — and multiply those
+   minutes.
+5. Add up the resulting bands. That's the shift, and the bands are exactly
+   what the app shows you.
 
-## Data sources & accuracy
+`npm test` runs the whole engine against a set of worked examples (night
+shifts across midnight, breaks split across bands, daily and weekly overtime,
+premiums that must not stack, holiday accrual) with no simulator involved.
 
-| Source | What | Notes |
-| --- | --- | --- |
-| [NHC `CurrentStorms.json`](https://www.nhc.noaa.gov/CurrentStorms.json) | Active storm positions, intensity, movement | Keyless public feed |
-| NHC Forecast/Advisory (TCM) | Official forecast track to 5 days | One text product per storm, parsed in-app |
-| [NHC Tropical Weather Outlook](https://www.nhc.noaa.gov/gtwo.php?basin=atlc&fdays=7) | 2-day / 7-day formation chances | `TWOAT.xml` |
-| [Open-Meteo](https://open-meteo.com/) | 16-day UK wind and gust forecast | Free, no API key |
-| [MeteoAlarm](https://meteoalarm.org/) | Official Met Office weather warnings | Keyless ATOM feed |
-| [Environment Agency](https://environment.data.gov.uk/flood-monitoring/doc/reference) | Live flood warnings | England only, keyless |
-| Open-Meteo grid scan | Deep Atlantic lows / ex-hurricane tracking | 50-point pressure grid, 7 days |
-
-Honest limitations, shown in-app too:
-
-- Advisories are issued every **6 hours** (03/09/15/21 UTC) with intermediate
-  position updates in between, so a storm's position can be up to ~3 hours old.
-- The NHC **does not forecast beyond 5 days**. Everything past that — every
-  dashed track, and any "closest approach" more than five days out — is this
-  app's own extrapolation. Real storms wobble, stall, get absorbed and
-  recurve; treat the score as *"how much attention is this worth today"*, not
-  a forecast of what will happen.
-- Storms that do reach us have almost always stopped being hurricanes on the
-  way: they arrive as **ex-hurricane windstorms** — strong wind and heavy rain,
-  not a hurricane landfall.
-- Formation chances come from the NHC outlook text, which gives no coordinates,
-  so developing areas are described rather than mapped.
-- **This is not an official warning service.** For UK weather warnings use the
-  [Met Office](https://www.metoffice.gov.uk/weather/warnings-and-advice/uk-warnings);
-  for tropical cyclone advisories use the
-  [NHC](https://www.nhc.noaa.gov/). In an emergency call 999.
-
-## How the UK risk score is built
-
-For each storm, in `src/ukrisk.js`:
-
-1. Take the official NHC forecast track (0–120 h).
-2. Extend it forward for up to 84 more hours along the heading and speed of
-   its final leg, allowing a little acceleration when the motion is
-   north-easterly — the classic recurving path into the mid-latitude jet.
-3. Find the closest that combined path comes to any of eleven UK reference
-   points, and when.
-4. Score: proximity of that closest approach (discounted when it falls on the
-   extrapolated part), how closely the storm's heading points at the UK,
-   whether it's recurving north-east, its peak forecast intensity, and a
-   penalty for tracking west across the tropics. Long lead times get a
-   haircut.
-5. Band it: Minimal → Low → Watch → Elevated → High.
-
-Every factor that moved the number is shown in the storm's card, so the score
-can be argued with rather than just believed.
-
-## Alerts in Expo Go vs a real build
-
-In Expo Go, checks run while the app is open (every 10 minutes, and whenever
-you return to it) — and there are no widgets, no notification action buttons
-and no time-sensitive delivery. The standalone (EAS/TestFlight) build also
-registers a background task (`expo-background-task`) that re-checks the feeds
-while the app is closed, sends a local notification and refreshes the widget.
-iOS schedules these opportunistically (typically every few hours, requires
-Background App Refresh to be on), so keep that on or the widget will drift.
-
-## Install and test via expo.dev (EAS)
-
-Atlantic Storm Watch is its **own app** — new slug (`atlantic-storm-watch`),
-new bundle identifier (`com.atlanticstormwatch.app`) — so it installs
-alongside anything you had before rather than replacing it.
-
-One-time setup on a computer with Node (creates the new EAS project and
-registers the app with Apple):
+## Run it
 
 ```bash
-git clone https://github.com/rebecca002123/futureCast
-cd futureCast && npm install
+npm install
+npx expo start        # scan the QR code with Expo Go
+npm run web           # or just open it in a browser
+```
+
+- `npm test` — the pay engine's worked examples.
+- `npm run icon` — regenerates `assets/icon.png` from `tools/make-icon.mjs`.
+
+## Install it on a phone via expo.dev (EAS)
+
+Shift Pay is its own app — slug `shift-pay`, bundle identifier
+`com.shiftpay.app` — so it installs alongside anything already on the phone
+rather than replacing it. One-time setup on a computer with Node:
+
+```bash
 npx eas-cli login
-npx eas-cli init                 # creates @rebecca0021/atlantic-storm-watch, writes the project ID
-npx eas-cli update:configure     # writes the OTA updates URL
+npx eas-cli init                 # creates @rebecca0021/shift-pay, writes the project ID
+npx eas-cli update:configure     # writes the over-the-air updates URL
 git add app.json && git commit -m "Link EAS project" && git push
 npx eas-cli build -p ios --profile production
 ```
 
-The build prompts you to sign in with your Apple ID once — it registers the
-new bundle IDs, the App Group and the widget's provisioning profile, then
-builds a TestFlight-ready app. Afterwards, link the GitHub repo to the new
-project on expo.dev (project → GitHub) so the `.eas/workflows` automations
-(publish an update + build on every merge to `main`) run again.
-
-For a quick look without building: open the project's **Updates** page on
-expo.dev after merging and scan the update's QR code with **Expo Go**.
-
-## Run locally
-
-```bash
-npm install
-npx expo start        # scan the QR with Expo Go
-```
-
-(The map needs a phone — the web preview shows everything except the map.)
+The build asks for your Apple ID once, registers the bundle identifier and
+produces a TestFlight-ready app. Afterwards, link this repo to the new
+project on expo.dev (project → GitHub) so the `.eas/workflows` automations —
+publish an update and build iOS on every merge to `main` — run again.
 
 ## Project layout
 
-- `App.js` — UI (banner, Atlantic map, storm cards, formation watch, wind
-  outlook, settings)
-- `src/storms.js` — NHC feeds: current storms, forecast advisory parsing,
-  tropical weather outlook, geometry helpers
-- `src/ukrisk.js` — track extrapolation and the UK risk score
-- `src/ukwind.js` — Open-Meteo 16-day UK gust outlook
-- `src/watch.js` — one shared refresh + which events deserve an alert
-- `src/notify.js` — notification content, categories and interruption levels
-- `src/storage.js` — settings, alert history, mutes, last-known snapshot
-- `src/background.js` — periodic checks while the app is closed
-- `src/widget.js` — the snapshot handed to the widget through the App Group
-- `targets/storm-widget/` — the WidgetKit extension (SwiftUI)
-- `app.config.js` — injects `APPLE_TEAM_ID` from the environment
-- `tools/make-icon.mjs` — regenerates `assets/icon.png`
+- `App.js` — the three screens (Shifts, Pay, Settings) and the shift editor
+- `src/pay.js` — the pay engine: premiums, breaks, overtime, holiday accrual
+- `src/tax.js` — the take-home estimate: PAYE bands, NI, pension, student loans
+- `src/periods.js` — weekly / fortnightly / monthly pay period boundaries
+- `src/time.js` — dates, wall-clock times and the forgiving time parser
+- `src/format.js` — money and hours, formatted the way a payslip reads
+- `src/settings.js` — the settings shape and a new install's defaults
+- `src/storage.js` — reading and writing both of those on the device
+- `src/summary.js` — the shareable text summary and CSV export
+- `src/ui.js` — the shared buttons, chips, switches and number fields
+- `tools/pay.test.mjs` — the engine's worked examples (`npm test`)
+- `tools/make-icon.mjs` — draws the app icon, no image dependencies
 
----
+## Rates used by the take-home estimate
 
-This repository also hosts the privacy/support pages for the FutureCast iOS
-app: [PRIVACY.md](PRIVACY.md) · [index.html](index.html) ·
-support: rebeccaguntrip2001@gmail.com
+| | Threshold | Rate |
+| --- | --- | --- |
+| Personal allowance | £12,570 (tapered above £100,000) | 0% |
+| Basic rate | to £50,270 | 20% |
+| Higher rate | to £125,140 | 40% |
+| Additional rate | above £125,140 | 45% |
+| National Insurance | £12,570 – £50,270 | 8% |
+| National Insurance | above £50,270 | 2% |
+| Student loan | Plan 1 £26,065 · Plan 2 £28,470 · Plan 4 £32,745 · Plan 5 £25,000 | 9% |
+| Postgraduate loan | £21,000 | 6% |
+
+Scottish rates (19/20/21/42/45/48%) are used instead when Scotland is
+selected. These are the 2025/26 figures; the income tax thresholds are
+frozen, but check them against
+[gov.uk](https://www.gov.uk/income-tax-rates) if a payslip disagrees.

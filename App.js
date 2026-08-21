@@ -1,1209 +1,1358 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  AppState,
-  Linking,
+  KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
-  RefreshControl,
+  SafeAreaView,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import * as Notifications from 'expo-notifications';
 
+import { fmtHours, fmtMoney, fmtRate } from './src/format';
 import {
-  classificationLabel,
-  compassPoint,
-  fmtDayLabel,
-  intensityLabel,
-  ktToMph,
-  leadTimeLabel,
-  OUTLOOK_GRAPHIC_URL,
-  saffirSimpson,
-  stormColor,
-  timeAgoLabel,
-} from './src/storms';
-import { outlookWatchLevel, UK_CENTRE } from './src/ukrisk';
-import { searchTowns } from './src/places';
+  currentPeriod,
+  daysLeftInPeriod,
+  inPeriod,
+  PERIOD_TYPES,
+  periodLabel,
+  periodsPerYear,
+  periodSubtitle,
+  shiftPeriod,
+} from './src/periods';
+import { computeShifts, KEY_BASIC, overlappingShifts, summarise } from './src/pay';
+import { blankShift, JOB_COLORS, newId } from './src/settings';
+import { loadSettings, loadShifts, saveSettings, saveShifts } from './src/storage';
+import { buildCsv, buildSummaryText } from './src/summary';
+import { estimateDeductions, REGIONS, STUDENT_LOAN_PLANS, TAX_YEAR } from './src/tax';
 import {
-  climatologyToDate,
-  daysToPeak,
-  HISTORIC_UK_STORMS,
-  loadSeasonLog,
-  seasonActivityLabel,
-  seasonStormNumber,
-  updateSeasonLog,
-} from './src/season';
-import { WINDSTORM_GUST_MPH } from './src/ukwind';
-import { evaluateAlerts, fetchStormPicture, inQuietHours, summarise } from './src/watch';
+  addDaysISO,
+  compareISO,
+  DAY_SHORT,
+  dayLabel,
+  fmtDateLong,
+  fmtTime,
+  parseTimeInput,
+  relativeDayLabel,
+  taxYearLabel,
+  taxYearStartISO,
+  todayISO,
+} from './src/time';
 import {
-  clearBadge,
-  ensureNotificationPermission,
-  getPermissionStatus,
-  MUTE_ACTION,
-  sendTestNotification,
-  setupAndroidChannel,
-  setupNotificationCategories,
-} from './src/notify';
-import {
-  DEFAULT_SETTINGS,
-  loadAlerted,
-  loadMuted,
-  loadSettings,
-  loadSnapshot,
-  muteStorm,
-  saveAlerted,
-  saveSettings,
-  saveSnapshot,
-  unmuteStorm,
-} from './src/storage';
-import { notifyFor, registerBackgroundCheck, snapshotOf } from './src/background';
-import { updateWidget } from './src/widget';
+  Button,
+  C,
+  Card,
+  Chip,
+  ChipRow,
+  Divider,
+  NumberField,
+  SectionLabel,
+  Segmented,
+  StatRow,
+  SwitchRow,
+  TextField,
+  TimeField,
+} from './src/ui';
 
-// react-native-maps is native-only; guard so `expo start --web` still runs.
-let MapView = null;
-let Marker = null;
-let Polyline = null;
-if (Platform.OS !== 'web') {
-  const maps = require('react-native-maps');
-  MapView = maps.default;
-  Marker = maps.Marker;
-  Polyline = maps.Polyline;
-}
-
-const REFRESH_MS = 10 * 60 * 1000; // advisories are 6-hourly; re-check every 10 min
-const STALE_MS = 5 * 60 * 1000; // refresh on foreground if older than this
-const ALERT_BANDS = ['Watch', 'Elevated', 'High'];
-
-// The whole hurricane highway: the tropical Atlantic through to the UK.
-const ATLANTIC_REGION = {
-  latitude: 40.0,
-  longitude: -42.0,
-  latitudeDelta: 46.0,
-  longitudeDelta: 90.0,
-};
+const TABS = [
+  { id: 'shifts', label: 'Shifts' },
+  { id: 'pay', label: 'Pay' },
+  { id: 'settings', label: 'Settings' },
+];
 
 export default function App() {
-  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
-  const [picture, setPicture] = useState(null);
-  const [snapshot, setSnapshot] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [expanded, setExpanded] = useState({});
-  const [muted, setMuted] = useState({});
-  const [townQuery, setTownQuery] = useState('');
-  const [seasonLog, setSeasonLog] = useState({});
-  const [showHistory, setShowHistory] = useState(false);
-  const [permission, setPermission] = useState(null);
-  const [testSent, setTestSent] = useState(false);
-  const [now, setNow] = useState(new Date());
-
-  const alertedRef = useRef({});
-  const mutedRef = useRef({});
-  const pictureRef = useRef(null);
-  const settingsRef = useRef(settings);
-  const lastFetchRef = useRef(0);
-  settingsRef.current = settings;
-
-  const refresh = useCallback(async (isManual = false) => {
-    if (isManual) setRefreshing(true);
-    try {
-      const next = await fetchStormPicture(20000, settingsRef.current.place || null);
-      setPicture(next);
-      pictureRef.current = next;
-      lastFetchRef.current = Date.now();
-      if (next.stormsOk) {
-        loadSeasonLog()
-          .then((log) => updateSeasonLog(log, next.assessed))
-          .then(setSeasonLog)
-          .catch(() => {});
-      }
-
-      if (next.stormsOk || next.wind) {
-        saveSnapshot(snapshotOf(next));
-        updateWidget(next);
-        const { events, alerted } = evaluateAlerts(next, settingsRef.current, alertedRef.current, mutedRef.current);
-        alertedRef.current = alerted;
-        saveAlerted(alerted);
-        if (settingsRef.current.notificationsEnabled && events.length) {
-          const granted = await ensureNotificationPermission();
-          if (granted) {
-            // Foreground alerts are the same ones the background check sends.
-            for (const event of events.slice(0, 3)) await notifyFor(event);
-          }
-        }
-      }
-    } catch (e) {
-      setPicture((prev) => prev || { assessed: [], outlook: { areas: [] }, wind: null, errors: [String(e.message || e)], stormsOk: false, fetchedAt: new Date() });
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
+  const [settings, setSettings] = useState(null);
+  const [shifts, setShifts] = useState([]);
+  const [ready, setReady] = useState(false);
+  const [tab, setTab] = useState('shifts');
+  const [offset, setOffset] = useState(0);
+  const [draft, setDraft] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
-      const [s, alerted, snap, mutedMap] = await Promise.all([
-        loadSettings(),
-        loadAlerted(),
-        loadSnapshot(),
-        loadMuted(),
-      ]);
-      setSettings(s);
-      settingsRef.current = s;
-      alertedRef.current = alerted;
-      mutedRef.current = mutedMap;
-      setMuted(mutedMap);
-      setSnapshot(snap);
-      loadSeasonLog().then(setSeasonLog).catch(() => {});
-      await setupAndroidChannel();
-      await setupNotificationCategories();
-      if (s.notificationsEnabled) await ensureNotificationPermission();
-      setPermission(await getPermissionStatus());
-      clearBadge();
-      registerBackgroundCheck();
-      refresh();
+      const [loadedSettings, loadedShifts] = await Promise.all([loadSettings(), loadShifts()]);
+      if (cancelled) return;
+      setSettings(loadedSettings);
+      setShifts(loadedShifts);
+      setReady(true);
     })();
-
-    const interval = setInterval(() => refresh(), REFRESH_MS);
-    const tick = setInterval(() => setNow(new Date()), 60000);
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state !== 'active') return;
-      clearBadge();
-      if (Date.now() - lastFetchRef.current > STALE_MS) refresh();
-    });
-
-    // "Mute for 24h" on a storm alert, tapped from the notification itself.
-    let responseSub = null;
-    try {
-      responseSub = Notifications.addNotificationResponseReceivedListener(async (response) => {
-        const { actionIdentifier, notification } = response || {};
-        const stormId = notification?.request?.content?.data?.stormId;
-        if (actionIdentifier === MUTE_ACTION && stormId) {
-          const next = await muteStorm(stormId, 24);
-          mutedRef.current = next;
-          setMuted(next);
-        }
-      });
-    } catch {
-      // Notification responses aren't available on every platform.
-    }
-
     return () => {
-      clearInterval(interval);
-      clearInterval(tick);
-      sub.remove();
-      responseSub?.remove();
+      cancelled = true;
     };
-  }, [refresh]);
+  }, []);
+
+  // Save on every change: there's no "done" moment in an app like this, and
+  // losing a shift you typed on the bus is unforgivable.
+  useEffect(() => {
+    if (ready) saveShifts(shifts);
+  }, [ready, shifts]);
+  useEffect(() => {
+    if (ready && settings) saveSettings(settings);
+  }, [ready, settings]);
 
   const updateSettings = useCallback((patch) => {
-    setSettings((prev) => {
-      const next = { ...prev, ...patch };
-      settingsRef.current = next;
-      saveSettings(next);
-      return next;
+    setSettings((current) => ({ ...current, ...(typeof patch === 'function' ? patch(current) : patch) }));
+  }, []);
+
+  const results = useMemo(() => (settings ? computeShifts(shifts, settings) : []), [shifts, settings]);
+
+  const period = useMemo(() => {
+    if (!settings) return null;
+    return shiftPeriod(currentPeriod(settings.payPeriod), settings.payPeriod, offset);
+  }, [settings, offset]);
+
+  const periodResults = useMemo(
+    () => (period ? results.filter((result) => inPeriod(result.shift.date, period)) : []),
+    [results, period],
+  );
+
+  const totals = useMemo(() => summarise(periodResults, settings || {}), [periodResults, settings]);
+
+  const deductions = useMemo(() => {
+    if (!settings?.takeHome?.enabled) return null;
+    return estimateDeductions(totals.gross, periodsPerYear(settings.payPeriod), settings.takeHome);
+  }, [settings, totals.gross]);
+
+  const saveShift = useCallback((shift) => {
+    setShifts((current) => {
+      const exists = current.some((item) => item.id === shift.id);
+      return exists ? current.map((item) => (item.id === shift.id ? shift : item)) : [...current, shift];
     });
+    setDraft(null);
   }, []);
 
-  const sendTest = useCallback(async () => {
-    const granted = await ensureNotificationPermission();
-    const status = await getPermissionStatus();
-    setPermission(status);
-    if (!granted) return;
-    await sendTestNotification(pictureRef.current);
-    setTestSent(true);
-    setTimeout(() => setTestSent(false), 5000);
+  const removeShift = useCallback((id) => {
+    setShifts((current) => current.filter((item) => item.id !== id));
+    setDraft(null);
+    setExpandedId((current) => (current === id ? null : current));
   }, []);
 
-  const unmute = useCallback(async (stormId) => {
-    const next = await unmuteStorm(stormId);
-    mutedRef.current = next;
-    setMuted(next);
+  const duplicateShift = useCallback((shift) => {
+    const copy = { ...shift, id: newId(), date: addDaysISO(shift.date, 1) };
+    setDraft(copy);
   }, []);
 
-  const summary = useMemo(() => summarise(picture), [picture]);
-  const assessed = picture?.assessed || [];
-  const areas = picture?.outlook?.areas || [];
-  const wind = picture?.wind || null;
-  const dataDown = picture && !picture.stormsOk;
-
-  const banner = useMemo(() => {
-    if (loading && !picture) {
-      return { color: '#25304a', icon: '🛰', title: 'Checking the Atlantic…', body: 'Fetching the latest National Hurricane Center advisories.' };
-    }
-    if (dataDown && assessed.length === 0) {
-      return {
-        color: '#5d2a2a',
-        icon: '⚠️',
-        title: 'Storm data unavailable',
-        body: snapshot
-          ? `Couldn't reach the NHC. Showing what was last known${snapshot.fetchedAt ? ` (${timeAgoLabel(new Date(snapshot.fetchedAt), now)})` : ''}. Pull down to retry.`
-          : "Couldn't reach the National Hurricane Center. Check your connection and pull down to retry.",
-      };
-    }
-    const warn = summary.topWarning;
-    if (warn && warn.rank >= 3) {
-      return {
-        color: '#8c1d1d',
-        icon: '🔴',
-        title: `RED ${warn.type.toLowerCase()} warning${summary.stormName ? ` — Storm ${summary.stormName}` : ''}`,
-        body: `The Met Office has a red warning for ${warn.area}. Dangerous conditions expected — follow official advice.`,
-      };
-    }
-    const top = summary.top;
-    if (top && top.risk.score >= 60) {
-      return {
-        color: top.risk.score >= 80 ? '#8c1d1d' : '#8a3d16',
-        icon: '🌀',
-        title: `${top.storm.name} — UK risk ${top.risk.band.toLowerCase()}`,
-        body:
-          `Its track comes within about ${Math.round(top.risk.closest.miles)} miles of ${top.risk.closest.place} ` +
-          `${leadTimeLabel(top.risk.closest.point.time, now)}. ${confidenceSentence(top.risk)}`,
-      };
-    }
-    if (top && top.risk.score >= 38) {
-      return {
-        color: '#6b5a19',
-        icon: '👀',
-        title: `${top.storm.name} is worth watching`,
-        body:
-          `Recurving towards the north-east Atlantic — closest approach about ${Math.round(top.risk.closest.miles)} miles ` +
-          `from ${top.risk.closest.place} ${leadTimeLabel(top.risk.closest.point.time, now)}. ${confidenceSentence(top.risk)}`,
-      };
-    }
-    if (warn && warn.rank >= 2) {
-      return {
-        color: '#8a3d16',
-        icon: '⚠️',
-        title: `Amber ${warn.type.toLowerCase()} warning${summary.stormName ? ` — Storm ${summary.stormName}` : ''}`,
-        body: `In force for ${warn.area}. ${assessed.length ? 'Storm details below.' : 'Check the Met Office for timing and impacts.'}`,
-      };
-    }
-    if (wind?.stormyDays?.length) {
-      const d = wind.stormyDays[0];
-      return {
-        color: '#6b5a19',
-        icon: '💨',
-        title: `Windy spell forecast for ${fmtDayLabel(d.date)}`,
-        body:
-          `Gusts near ${Math.round(d.gustMph)} mph around ${d.worstSpot}. ` +
-          (assessed.length
-            ? 'No Atlantic storm is currently forecast towards us, so this is ordinary UK weather.'
-            : 'Not linked to any active tropical system.'),
-      };
-    }
-    if (assessed.length) {
-      return {
-        color: '#1f4a3f',
-        icon: '✅',
-        title: `${assessed.length} Atlantic system${assessed.length > 1 ? 's' : ''}, none aimed at the UK`,
-        body: `Nearest track stays about ${Math.round(summary.top.risk.closest.miles)} miles away. ${
-          summary.forming ? `${summary.forming} area${summary.forming > 1 ? 's' : ''} of disturbed weather could still develop.` : ''
-        }`.trim(),
-      };
-    }
-    return {
-      color: '#1f4a3f',
-      icon: '✅',
-      title: 'No active Atlantic storms',
-      body: summary.forming
-        ? `The NHC is watching ${summary.forming} area${summary.forming > 1 ? 's' : ''} that could develop — see the formation watch below.`
-        : 'Nothing tropical to track right now. Pull down any time to re-check.',
-    };
-  }, [loading, picture, dataDown, assessed.length, summary, wind, snapshot, now]);
+  if (!settings || !ready) {
+    return (
+      <View style={[styles.root, styles.centre]}>
+        <StatusBar style="light" />
+        <Text style={styles.loading}>Shift Pay</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.root}>
       <StatusBar style="light" />
-      <ScrollView
-        contentContainerStyle={styles.scroll}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => refresh(true)} tintColor="#fff" />}
-      >
+      <SafeAreaView style={styles.safe}>
         <View style={styles.header}>
-          <Text style={styles.title}>🌀 Atlantic Storm Watch</Text>
-          <Text style={styles.subtitle}>
-            Live NHC hurricane data + UK outlook ·{' '}
-            {picture?.fetchedAt ? `updated ${timeAgoLabel(picture.fetchedAt, now)}` : 'loading…'}
+          <Text style={styles.brand}>Shift Pay</Text>
+          {tab !== 'settings' ? (
+            <Pressable
+              onPress={() => setDraft(blankShift(settings))}
+              style={({ pressed }) => [styles.addBtn, pressed && { opacity: 0.7 }]}
+            >
+              <Text style={styles.addBtnText}>+ Add shift</Text>
+            </Pressable>
+          ) : null}
+        </View>
+
+        {tab === 'shifts' ? (
+          <ShiftsScreen
+            settings={settings}
+            period={period}
+            offset={offset}
+            setOffset={setOffset}
+            results={periodResults}
+            totals={totals}
+            deductions={deductions}
+            expandedId={expandedId}
+            setExpandedId={setExpandedId}
+            onEdit={setDraft}
+            onDuplicate={duplicateShift}
+            onDelete={removeShift}
+            onAdd={() => setDraft(blankShift(settings))}
+          />
+        ) : null}
+
+        {tab === 'pay' ? (
+          <PayScreen
+            settings={settings}
+            period={period}
+            offset={offset}
+            setOffset={setOffset}
+            results={periodResults}
+            totals={totals}
+            deductions={deductions}
+            allResults={results}
+            onOpenSettings={() => setTab('settings')}
+          />
+        ) : null}
+
+        {tab === 'settings' ? (
+          <SettingsScreen
+            settings={settings}
+            update={updateSettings}
+            shiftCount={shifts.length}
+            onClearShifts={() => setShifts([])}
+          />
+        ) : null}
+
+        <View style={styles.tabBar}>
+          {TABS.map((item) => {
+            const active = item.id === tab;
+            return (
+              <Pressable
+                key={item.id}
+                onPress={() => setTab(item.id)}
+                style={({ pressed }) => [styles.tab, pressed && { opacity: 0.6 }]}
+              >
+                <Text style={[styles.tabText, active && styles.tabTextActive]}>{item.label}</Text>
+                <View style={[styles.tabDot, active && { backgroundColor: C.accent }]} />
+              </Pressable>
+            );
+          })}
+        </View>
+      </SafeAreaView>
+
+      <ShiftEditor
+        draft={draft}
+        settings={settings}
+        shifts={shifts}
+        onChange={setDraft}
+        onSave={saveShift}
+        onDelete={removeShift}
+        onClose={() => setDraft(null)}
+      />
+    </View>
+  );
+}
+
+function PeriodBar({ period, settings, offset, setOffset }) {
+  const daysLeft = offset === 0 ? daysLeftInPeriod(period) : null;
+  return (
+    <View style={styles.periodBar}>
+      <Pressable onPress={() => setOffset(offset - 1)} style={({ pressed }) => [styles.arrow, pressed && { opacity: 0.6 }]}>
+        <Text style={styles.arrowText}>‹</Text>
+      </Pressable>
+      <Pressable onPress={() => setOffset(0)} style={{ flex: 1 }}>
+        <Text style={styles.periodLabel}>{periodLabel(period)}</Text>
+        <Text style={styles.periodSub}>
+          {offset === 0
+            ? `This pay period · ${daysLeft} ${daysLeft === 1 ? 'day' : 'days'} left`
+            : periodSubtitle(period, settings.payPeriod)}
+        </Text>
+      </Pressable>
+      <Pressable onPress={() => setOffset(offset + 1)} style={({ pressed }) => [styles.arrow, pressed && { opacity: 0.6 }]}>
+        <Text style={styles.arrowText}>›</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function HeadlineCard({ totals, deductions, settings }) {
+  return (
+    <Card>
+      <Text style={styles.headlineLabel}>Gross pay this period</Text>
+      <Text style={styles.headline}>{fmtMoney(totals.gross, settings.currency)}</Text>
+      <View style={styles.headlineRow}>
+        <Headline stat={fmtHours(totals.hours)} label="worked" />
+        <Headline stat={String(totals.count)} label={totals.count === 1 ? 'shift' : 'shifts'} />
+        <Headline
+          stat={totals.hours > 0 ? fmtMoney(totals.avgHourly, settings.currency) : '—'}
+          label="average/hour"
+        />
+      </View>
+      {deductions ? (
+        <>
+          <Divider />
+          <StatRow
+            label="Estimated take-home"
+            hint={`After tax, NI${deductions.pension > 0 ? ', pension' : ''}${deductions.studentLoan > 0 ? ', student loan' : ''} — ${TAX_YEAR} rates`}
+            value={fmtMoney(deductions.net, settings.currency)}
+            tone={C.accent}
+            bold
+          />
+        </>
+      ) : null}
+    </Card>
+  );
+}
+
+function Headline({ stat, label }) {
+  return (
+    <View style={styles.headlineStat}>
+      <Text style={styles.headlineStatValue}>{stat}</Text>
+      <Text style={styles.headlineStatLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function ShiftsScreen({
+  settings,
+  period,
+  offset,
+  setOffset,
+  results,
+  totals,
+  deductions,
+  expandedId,
+  setExpandedId,
+  onEdit,
+  onDuplicate,
+  onDelete,
+  onAdd,
+}) {
+  return (
+    <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <PeriodBar period={period} settings={settings} offset={offset} setOffset={setOffset} />
+      <HeadlineCard totals={totals} deductions={deductions} settings={settings} />
+
+      <SectionLabel>{results.length ? `${results.length} ${results.length === 1 ? 'shift' : 'shifts'}` : 'Shifts'}</SectionLabel>
+
+      {results.length === 0 ? (
+        <Card>
+          <Text style={styles.emptyTitle}>Nothing logged for this period</Text>
+          <Text style={styles.emptyBody}>
+            Add a shift and the pay works itself out from your hourly rate, your unpaid break and any
+            night, weekend or overtime rules you've set up.
+          </Text>
+          <Button label="Add a shift" onPress={onAdd} style={{ marginTop: 14 }} />
+        </Card>
+      ) : null}
+
+      {results.map((result) => (
+        <ShiftRow
+          key={result.id}
+          result={result}
+          settings={settings}
+          expanded={expandedId === result.id}
+          onToggle={() => setExpandedId(expandedId === result.id ? null : result.id)}
+          onEdit={() => onEdit(result.shift)}
+          onDuplicate={() => onDuplicate(result.shift)}
+          onDelete={() => onDelete(result.id)}
+        />
+      ))}
+
+      {results.length ? (
+        <Text style={styles.footnote}>Tap a shift to see how its pay was worked out.</Text>
+      ) : null}
+    </ScrollView>
+  );
+}
+
+function ShiftRow({ result, settings, expanded, onToggle, onEdit, onDuplicate, onDelete }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const { shift } = result;
+  const times = `${fmtTime(result.startMin, settings.clock24)} – ${fmtTime(result.endMin, settings.clock24)}`;
+  const color = result.job?.color || C.accent;
+
+  return (
+    <Card style={{ padding: 0, overflow: 'hidden' }}>
+      <Pressable onPress={onToggle} style={({ pressed }) => [styles.shiftRow, pressed && { opacity: 0.75 }]}>
+        <View style={[styles.jobStripe, { backgroundColor: color }]} />
+        <View style={{ flex: 1 }}>
+          <View style={styles.shiftTop}>
+            <Text style={styles.shiftDate}>{dayLabel(shift.date)}</Text>
+            {settings.jobs.length > 1 && result.job ? (
+              <Text style={[styles.shiftJob, { color }]}>{result.job.name}</Text>
+            ) : null}
+          </View>
+          <Text style={styles.shiftTimes}>
+            {times}
+            {result.crossesMidnight ? ' (+1)' : ''}
+            {result.breakMins ? ` · ${result.breakMins}m break` : ''}
           </Text>
         </View>
-
-        <View style={[styles.banner, { backgroundColor: banner.color }]}>
-          <Text style={styles.bannerIcon}>{banner.icon}</Text>
-          <View style={styles.bannerText}>
-            <Text style={styles.bannerTitle}>{banner.title}</Text>
-            <Text style={styles.bannerBody}>{banner.body}</Text>
-          </View>
+        <View style={{ alignItems: 'flex-end' }}>
+          <Text style={styles.shiftPay}>{fmtMoney(result.gross, settings.currency)}</Text>
+          <Text style={styles.shiftHours}>{fmtHours(result.hours)}</Text>
         </View>
+      </Pressable>
 
-        {MapView ? (
-          <View style={styles.mapWrap}>
-            <MapView style={styles.map} initialRegion={ATLANTIC_REGION} mapType="mutedStandard">
-              {(picture?.lows?.lows || []).map((low) => (
-                <React.Fragment key={low.id}>
-                  {Polyline && low.points.length > 1 && (
-                    <Polyline
-                      coordinates={low.points.map((p) => ({ latitude: p.lat, longitude: p.lon }))}
-                      strokeColor="#8899bb"
-                      strokeWidth={2}
-                      lineDashPattern={[4, 6]}
-                    />
-                  )}
-                  <Marker
-                    coordinate={{ latitude: low.current.lat, longitude: low.current.lon }}
-                    title={`${low.exName ? `Ex-${low.exName} · ` : ''}${low.minPressure} hPa low`}
-                    description={`Model estimate · gusts ${low.maxGust} mph · ${low.threat.label}`}
-                    pinColor="#8899bb"
-                  />
-                </React.Fragment>
-              ))}
-              <Marker
-                coordinate={{ latitude: UK_CENTRE.lat, longitude: UK_CENTRE.lon }}
-                title="United Kingdom"
-                description="Distances and risk are measured to the nearest UK coast"
-                pinColor="#4dabf7"
-              />
-              {assessed.map(({ storm, risk }) => (
-                <React.Fragment key={storm.id}>
-                  {Polyline && risk.official.length > 1 && (
-                    <Polyline
-                      coordinates={risk.official.map((p) => ({ latitude: p.lat, longitude: p.lon }))}
-                      strokeColor={stormColor(storm)}
-                      strokeWidth={3}
-                    />
-                  )}
-                  {Polyline && risk.official.length > 0 && risk.projected.length > 1 && (
-                    <Polyline
-                      coordinates={[risk.official[risk.official.length - 1], ...risk.projected].map((p) => ({
-                        latitude: p.lat,
-                        longitude: p.lon,
-                      }))}
-                      strokeColor={stormColor(storm)}
-                      strokeWidth={2}
-                      lineDashPattern={[8, 8]}
-                    />
-                  )}
-                  <Marker
-                    coordinate={{ latitude: storm.lat, longitude: storm.lon }}
-                    title={`${storm.name} · ${intensityLabel(storm)}`}
-                    description={`${Math.round(ktToMph(storm.windKt))} mph winds · UK risk ${risk.band}`}
-                    pinColor={saffirSimpson(storm.windKt) ? '#ff3b30' : '#ffcc00'}
-                  />
-                </React.Fragment>
-              ))}
-            </MapView>
-            <View style={styles.legend}>
-              <Text style={styles.legendText}>— NHC forecast   ┈ app extrapolation</Text>
-            </View>
-          </View>
-        ) : (
-          <View style={styles.card}>
-            <Text style={styles.cardBody}>The map is available on iOS/Android (open in Expo Go).</Text>
-          </View>
-        )}
-
-        <View style={styles.statsRow}>
-          <Stat label="Active systems" value={loading && !picture ? '…' : String(assessed.length)} />
-          <Stat label="Hurricanes" value={loading && !picture ? '…' : String(summary.hurricanes)} />
-          <Stat label="Could form" value={loading && !picture ? '…' : String(areas.length)} />
-          <Stat
-            label="UK risk"
-            value={assessed.length ? summary.top.risk.band : '—'}
-            color={assessed.length ? summary.top.risk.color : undefined}
-          />
-        </View>
-
-        <Text style={styles.sectionTitle}>Official UK weather warnings</Text>
-        {picture?.warnings ? (
-          picture.warnings.warnings.length ? (
-            <View style={styles.card}>
-              {summary.stormName ? (
-                <Text style={[styles.cardBody, styles.namedStorm]}>
-                  🌀 The Met Office has named this storm: Storm {summary.stormName}
-                </Text>
-              ) : null}
-              {picture.warnings.warnings.slice(0, 8).map((w) => (
-                <View key={w.id} style={styles.warningRow}>
-                  <View style={[styles.warnPill, { backgroundColor: w.color }]}>
-                    <Text style={styles.warnPillText}>{w.level.toUpperCase()}</Text>
-                  </View>
-                  <View style={styles.warningTextWrap}>
-                    <Text style={styles.cardBody}>
-                      {w.icon} {w.type} — {w.area}
-                    </Text>
-                    <Text style={styles.warnMeta}>
-                      {w.active ? 'In force now' : w.onset ? `From ${fmtDayLabel(w.onset)}` : ''}
-                      {w.expires ? ` until ${fmtDayLabel(w.expires)}` : ''}
-                    </Text>
-                  </View>
-                </View>
-              ))}
-              <Pressable onPress={() => Linking.openURL('https://www.metoffice.gov.uk/weather/warnings-and-advice/uk-warnings')}>
-                <Text style={styles.linkBtnText}>Full details on the Met Office site ↗</Text>
-              </Pressable>
-            </View>
-          ) : (
-            <View style={styles.card}>
-              <Text style={styles.cardBody}>✅ No weather warnings in force for the UK right now.</Text>
-              <Text style={styles.smallNote}>
-                Live from MeteoAlarm, which republishes the Met Office's yellow/amber/red warnings.
-              </Text>
-            </View>
-          )
-        ) : (
-          <View style={styles.card}>
-            <Text style={styles.cardBody}>Warnings feed unavailable — pull down to retry.</Text>
-          </View>
-        )}
-
-        <Text style={styles.sectionTitle}>
-          {assessed.length ? 'Active Atlantic storms' : loading && !picture ? 'Loading storms…' : 'Active Atlantic storms'}
-        </Text>
-        {!assessed.length && !loading && (
-          <View style={styles.card}>
-            <Text style={styles.cardBody}>
-              The National Hurricane Center is not tracking any Atlantic tropical cyclones right now. The
-              formation watch below shows anything that might spin up over the next week.
-            </Text>
-          </View>
-        )}
-        {assessed.map(({ storm, risk }) => (
-          <StormCard
-            key={storm.id}
-            storm={storm}
-            risk={risk}
-            now={now}
-            muted={muted[storm.id] > now.getTime()}
-            open={!!expanded[storm.id]}
-            onToggle={() => setExpanded((p) => ({ ...p, [storm.id]: !p[storm.id] }))}
-          />
-        ))}
-
-        <Text style={styles.sectionTitle}>Atlantic lows radar</Text>
-        {picture?.lows?.gridOk ? (
-          picture.lows.lows.length ? (
-            <>
-              {picture.lows.lows.slice(0, 4).map((low) => (
-                <View key={low.id} style={styles.card}>
-                  <View style={styles.cardHeaderRow}>
-                    <Text style={styles.cardTitle}>
-                      {low.exName ? `Ex-${low.exName} · ` : ''}
-                      {low.minPressure} hPa low
-                      {low.startsInFuture ? ' (forecast to form)' : ''}
-                    </Text>
-                    <View style={[styles.ratingPill, { backgroundColor: low.threat.color }]}>
-                      <Text style={styles.ratingText}>{low.threat.label}</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.cardBody}>
-                    {fmtLatLon(low.current.lat, low.current.lon)}
-                    {low.headingLabel ? ` · moving ${low.headingLabel}${low.speedMph ? ` at ${low.speedMph} mph` : ''}` : ' · slow-moving'}
-                    {` · gusts near the centre up to ${low.maxGust} mph`}
-                  </Text>
-                  <Text style={styles.cardBody}>
-                    Closest to the UK: ~{Math.round(low.closest.miles).toLocaleString()} miles from {low.closest.place}{' '}
-                    {leadTimeLabel(low.closest.point.time, now)}
-                  </Text>
-                </View>
-              ))}
-              <Text style={styles.smallNote}>
-                Every deep low the global weather model sees in the North Atlantic over the next 7 days — including
-                ex-hurricanes after the NHC stops tracking them, and ordinary windstorms that were never tropical.
-                Positions are model estimates on a coarse grid, not official advisories.
-              </Text>
-            </>
-          ) : (
-            <View style={styles.card}>
-              <Text style={styles.cardBody}>
-                ✅ No deep low-pressure systems in the North Atlantic forecast for the next 7 days.
-              </Text>
-              <Text style={styles.smallNote}>
-                This scan catches ex-hurricanes after the NHC stops advising on them, plus non-tropical windstorms.
-              </Text>
-            </View>
-          )
-        ) : (
-          <View style={styles.card}>
-            <Text style={styles.cardBody}>Atlantic lows scan unavailable — pull down to retry.</Text>
-          </View>
-        )}
-
-        <Text style={styles.sectionTitle}>Risk for my location</Text>
-        <View style={styles.card}>
-          {settings.place ? (
-            <>
-              <View style={styles.cardHeaderRow}>
-                <Text style={styles.cardTitle}>📍 {settings.place.name}</Text>
-                <Pressable onPress={() => updateSettings({ place: null })}>
-                  <Text style={styles.changeLink}>Change</Text>
-                </Pressable>
-              </View>
-              {picture?.local?.storms?.length ? (
-                picture.local.storms.slice(0, 2).map(({ storm, closest }) => (
-                  <Text key={storm.id} style={styles.cardBody}>
-                    🌀 {storm.name}: track passes ~{Math.round(closest.miles).toLocaleString()} miles from you
-                    {closest.point?.time ? ` ${leadTimeLabel(closest.point.time, now)}` : ''}
-                    {closest.point?.extrapolated ? ' (extrapolated)' : ' (NHC forecast)'}
-                  </Text>
-                ))
-              ) : (
-                <Text style={styles.cardBody}>
-                  {assessed.length
-                    ? 'No storm track currently passes anywhere near you.'
-                    : 'No active storms to measure from.'}
-                </Text>
-              )}
-              {picture?.local?.wind?.peak ? (
-                <Text style={[styles.cardBody, { marginTop: 8 }]}>
-                  💨 Windiest day for you: {Math.round(picture.local.wind.peak.gustMph)} mph gusts on{' '}
-                  {fmtDayLabel(picture.local.wind.peak.date)}
-                  {picture.local.wind.stormyDays.length
-                    ? ` · ${picture.local.wind.stormyDays.length} gale-force day${picture.local.wind.stormyDays.length > 1 ? 's' : ''} in the next 16`
-                    : ' — nothing gale-force in the next 16 days'}
-                </Text>
-              ) : null}
-              <Text style={styles.smallNote}>
-                Distances are to your town from each storm's forecast track; wind is the 16-day Open-Meteo forecast for
-                your coordinates.
-              </Text>
-            </>
-          ) : (
-            <>
-              <Text style={styles.cardBody}>
-                Pick your town to see how close each storm's track comes to you and your own 16-day wind outlook.
-              </Text>
-              <TextInput
-                style={styles.townInput}
-                placeholder="Start typing your town…"
-                placeholderTextColor="#63708a"
-                value={townQuery}
-                onChangeText={setTownQuery}
-                autoCorrect={false}
-              />
-              {searchTowns(townQuery).map((town) => (
-                <Pressable
-                  key={town.name}
-                  style={styles.townRow}
-                  onPress={() => {
-                    updateSettings({ place: town });
-                    setTownQuery('');
-                    refresh();
-                  }}
-                >
-                  <Text style={styles.cardBody}>📍 {town.name}</Text>
-                </Pressable>
-              ))}
-              <Text style={styles.smallNote}>
-                Stored only on your phone. No GPS permission needed — and you can change it any time.
-              </Text>
-            </>
-          )}
-        </View>
-
-        <Text style={styles.sectionTitle}>Formation watch (next 7 days)</Text>
-        {areas.length === 0 ? (
-          <View style={styles.card}>
-            <Text style={styles.cardBody}>
-              {picture?.outlook?.body
-                ? 'No areas of disturbed weather are being highlighted — tropical cyclone formation is not expected during the next 7 days.'
-                : 'Formation outlook unavailable — pull down to retry.'}
-            </Text>
-          </View>
-        ) : (
-          areas.map((area) => <OutlookCard key={area.id} area={area} />)
-        )}
-        {picture?.outlook?.issuedAt && (
-          <Pressable onPress={() => Linking.openURL(OUTLOOK_GRAPHIC_URL)}>
-            <Text style={styles.linkBtnText}>
-              NHC tropical weather outlook, issued {timeAgoLabel(picture.outlook.issuedAt, now)} — view the map ↗
-            </Text>
-          </Pressable>
-        )}
-
-        <Text style={styles.sectionTitle}>UK wind outlook (16 days)</Text>
-        {wind && wind.peak ? (
-          <View style={styles.card}>
-            <Text style={styles.cardBody}>
-              {wind.stormyDays.length
-                ? `Gales or worse currently forecast on ${wind.stormyDays.length} day${wind.stormyDays.length > 1 ? 's' : ''}. `
-                : 'Nothing stormy in the forecast yet. '}
-              Peak gust {Math.round(wind.peak.gustMph)} mph on {fmtDayLabel(wind.peak.date)} near {wind.peak.worstSpot}.
-            </Text>
-            <View style={styles.windRows}>
-              {wind.days.map((d) => (
-                <View key={d.dateISO} style={styles.windRow}>
-                  <Text style={styles.windDay}>{fmtDayLabel(d.date)}</Text>
-                  <View style={styles.windBarTrack}>
-                    <View
-                      style={[
-                        styles.windBarFill,
-                        { width: `${Math.min(100, (d.gustMph / 90) * 100)}%`, backgroundColor: d.band.color },
-                      ]}
-                    />
-                  </View>
-                  <Text style={styles.windValue}>{Math.round(d.gustMph)}</Text>
-                </View>
-              ))}
-            </View>
-            <Text style={styles.smallNote}>
-              Highest forecast gust (mph) anywhere in {`${wind.locations}`} UK locations, from the Open-Meteo global
-              model. This is where an ex-hurricane actually shows up for us: once a storm is being pulled across the
-              Atlantic, the models put the wind into this chart days before it arrives. Gusts above {WINDSTORM_GUST_MPH}{' '}
-              mph are gale/storm force. Always check Met Office warnings for the official picture.
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.card}>
-            <Text style={styles.cardBody}>UK wind outlook unavailable — pull down to retry.</Text>
-          </View>
-        )}
-
-        <Text style={styles.sectionTitle}>Flood warnings (England)</Text>
-        {picture?.floods ? (
-          picture.floods.floods.length ? (
-            <View style={styles.card}>
-              <Text style={styles.cardBody}>
-                {picture.floods.counts.severe ? `🚨 ${picture.floods.counts.severe} severe · ` : ''}
-                {picture.floods.counts.warning} warning{picture.floods.counts.warning === 1 ? '' : 's'} ·{' '}
-                {picture.floods.counts.alert} alert{picture.floods.counts.alert === 1 ? '' : 's'}
-              </Text>
-              {picture.floods.floods.slice(0, 6).map((f) => (
-                <View key={f.id} style={styles.warningRow}>
-                  <View style={[styles.warnPill, { backgroundColor: f.color }]}>
-                    <Text style={styles.warnPillText}>{f.short.toUpperCase()}</Text>
-                  </View>
-                  <View style={styles.warningTextWrap}>
-                    <Text style={styles.cardBody}>{f.area}</Text>
-                    {f.region ? <Text style={styles.warnMeta}>{f.region}</Text> : null}
-                  </View>
-                </View>
-              ))}
-              {picture.floods.floods.length > 6 ? (
-                <Text style={styles.smallNote}>…and {picture.floods.floods.length - 6} more.</Text>
-              ) : null}
-              <Pressable onPress={() => Linking.openURL('https://check-for-flooding.service.gov.uk/')}>
-                <Text style={styles.linkBtnText}>Check your area on gov.uk ↗</Text>
-              </Pressable>
-            </View>
-          ) : (
-            <View style={styles.card}>
-              <Text style={styles.cardBody}>✅ No flood alerts or warnings in force in England.</Text>
-              <Text style={styles.smallNote}>
-                Live from the Environment Agency (England only — Wales and Scotland publish theirs separately at
-                Natural Resources Wales and SEPA).
-              </Text>
-            </View>
-          )
-        ) : (
-          <View style={styles.card}>
-            <Text style={styles.cardBody}>Flood feed unavailable — pull down to retry.</Text>
-          </View>
-        )}
-
-        <Text style={styles.sectionTitle}>This hurricane season</Text>
-        <View style={styles.card}>
-          <SeasonStats assessed={assessed} seasonLog={seasonLog} now={now} />
-          {Object.keys(seasonLog).length ? (
-            <>
-              <Text style={styles.detailHeading}>Systems tracked this season</Text>
-              {Object.entries(seasonLog)
-                .sort((a, b) => b[1].lastSeen - a[1].lastSeen)
-                .slice(0, 8)
-                .map(([id, entry]) => (
-                  <Text key={id} style={styles.detailLine}>
-                    🌀 {entry.name} — peaked {Math.round(ktToMph(entry.maxWindKt))} mph
-                    {isFinite(entry.minUKMiles)
-                      ? ` · track came within ${Math.round(entry.minUKMiles).toLocaleString()} mi of the UK`
-                      : ''}
-                  </Text>
-                ))}
-            </>
+      {expanded ? (
+        <View style={styles.shiftDetail}>
+          <Text style={styles.detailHead}>{fmtDateLong(shift.date)}</Text>
+          <StatRow label="Clocked" value={`${times}${result.crossesMidnight ? ' (next day)' : ''}`} />
+          <StatRow label="Unpaid break" value={result.breakMins ? `${result.breakMins} min` : 'none'} />
+          <StatRow label="Paid hours" value={fmtHours(result.hours)} />
+          <Divider />
+          {result.segments.map((seg) => (
+            <StatRow
+              key={`${seg.key}-${seg.otMult}-${seg.hourly}`}
+              label={seg.label}
+              hint={`${fmtHours(seg.hours)} at ${fmtRate(seg.hourly, settings.currency)}${
+                seg.key === KEY_BASIC && seg.otMult === 1 ? '' : ` (base ${fmtRate(result.rate, settings.currency)})`
+              }`}
+              value={fmtMoney(seg.pay, settings.currency)}
+              tone={seg.key === KEY_BASIC && seg.otMult === 1 ? undefined : C.accent}
+            />
+          ))}
+          {result.segments.length === 0 ? <Text style={styles.emptyBody}>No paid time on this shift.</Text> : null}
+          <Divider />
+          <StatRow label="Gross for this shift" value={fmtMoney(result.gross, settings.currency)} bold />
+          {settings.holiday?.enabled && result.holidayHours > 0 ? (
+            <StatRow
+              label="Holiday accrued"
+              hint={`${settings.holiday.percent}% of hours worked`}
+              value={`${fmtHours(result.holidayHours)} · ${fmtMoney(result.holidayPay, settings.currency)}`}
+            />
           ) : null}
-          <Pressable onPress={() => setShowHistory((v) => !v)}>
-            <Text style={styles.linkBtnText}>
-              {showHistory ? 'Hide' : 'Show'} ex-hurricanes that reached the UK {showHistory ? '▴' : '▾'}
-            </Text>
-          </Pressable>
-          {showHistory
-            ? HISTORIC_UK_STORMS.map((h) => (
-                <Text key={`${h.year}-${h.name}`} style={styles.detailLine}>
-                  <Text style={styles.bold}>{h.name} ({h.year})</Text> — {h.note}
-                </Text>
-              ))
-            : null}
-        </View>
+          {shift.note ? <Text style={styles.note}>“{shift.note}”</Text> : null}
 
-        <Text style={styles.sectionTitle}>Alerts</Text>
-        <View style={styles.card}>
-          <Text style={styles.cardBody}>Notify me when a storm's UK risk reaches:</Text>
-          <View style={styles.chipRow}>
-            {ALERT_BANDS.map((band) => (
-              <Pressable
-                key={band}
-                onPress={() => updateSettings({ alertBand: band })}
-                style={[styles.chip, settings.alertBand === band && styles.chipActive]}
-              >
-                <Text style={[styles.chipText, settings.alertBand === band && styles.chipTextActive]}>{band}</Text>
-              </Pressable>
+          <View style={styles.detailButtons}>
+            <Button label="Edit" onPress={onEdit} kind="secondary" style={{ flex: 1 }} />
+            <Button label="Duplicate" onPress={onDuplicate} kind="secondary" style={{ flex: 1 }} />
+            <Button
+              label={confirmDelete ? 'Sure?' : 'Delete'}
+              kind="danger"
+              style={{ flex: 1 }}
+              onPress={() => (confirmDelete ? onDelete() : setConfirmDelete(true))}
+            />
+          </View>
+        </View>
+      ) : null}
+    </Card>
+  );
+}
+
+function PayScreen({ settings, period, offset, setOffset, results, totals, deductions, allResults, onOpenSettings }) {
+  const [shared, setShared] = useState(null);
+
+  const yearStart = taxYearStartISO();
+  const yearToDate = useMemo(
+    () => summarise(allResults.filter((result) => compareISO(result.shift.date, yearStart) >= 0 && compareISO(result.shift.date, todayISO()) <= 0), settings),
+    [allResults, settings, yearStart],
+  );
+
+  const share = useCallback(
+    async (kind) => {
+      const message =
+        kind === 'csv'
+          ? buildCsv(results, settings)
+          : buildSummaryText({ period, results, totals, deductions, settings });
+      try {
+        await Share.share({ message });
+        setShared(null);
+      } catch {
+        // Sharing isn't available in every context (the web preview, mostly),
+        // so fall back to showing the text to copy by hand.
+        setShared(message);
+      }
+    },
+    [results, settings, period, totals, deductions],
+  );
+
+  return (
+    <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <PeriodBar period={period} settings={settings} offset={offset} setOffset={setOffset} />
+      <HeadlineCard totals={totals} deductions={deductions} settings={settings} />
+
+      <SectionLabel>What made up the pay</SectionLabel>
+      <Card>
+        {totals.segments.length ? (
+          totals.segments.map((seg) => (
+            <StatRow
+              key={`${seg.key}-${seg.otMult}-${seg.hourly}`}
+              label={seg.label}
+              hint={`${fmtHours(seg.hours)} at ${fmtRate(seg.hourly, settings.currency)}`}
+              value={fmtMoney(seg.pay, settings.currency)}
+              tone={seg.key === KEY_BASIC && seg.otMult === 1 ? undefined : C.accent}
+            />
+          ))
+        ) : (
+          <Text style={styles.emptyBody}>No shifts in this period yet.</Text>
+        )}
+        {totals.segments.length ? (
+          <>
+            <Divider />
+            <StatRow label="Gross" value={fmtMoney(totals.gross, settings.currency)} bold />
+            {totals.breakMins > 0 ? (
+              <StatRow
+                label="Unpaid breaks"
+                hint="Taken off the hours before any pay is worked out"
+                value={fmtHours(totals.breakMins / 60)}
+              />
+            ) : null}
+          </>
+        ) : null}
+      </Card>
+
+      {settings.jobs.length > 1 && totals.byJob.length > 1 ? (
+        <>
+          <SectionLabel>By job</SectionLabel>
+          <Card>
+            {totals.byJob.map((job) => (
+              <StatRow
+                key={job.id}
+                label={job.name}
+                hint={`${job.count} ${job.count === 1 ? 'shift' : 'shifts'} · ${fmtHours(job.hours)}`}
+                value={fmtMoney(job.gross, settings.currency)}
+                tone={job.color}
+              />
             ))}
-          </View>
-          <Toggle
-            label="Notifications"
-            value={settings.notificationsEnabled}
-            onPress={() => updateSettings({ notificationsEnabled: !settings.notificationsEnabled })}
-          />
-          <Toggle
-            label="New storms & formation alerts"
-            value={settings.formationAlerts}
-            onPress={() => updateSettings({ formationAlerts: !settings.formationAlerts })}
-          />
-          <Toggle
-            label="UK gale-force wind alerts"
-            value={settings.windAlerts}
-            onPress={() => updateSettings({ windAlerts: !settings.windAlerts })}
-          />
-          <Toggle
-            label="Amber/red weather warnings"
-            value={settings.warningAlerts !== false}
-            onPress={() => updateSettings({ warningAlerts: settings.warningAlerts === false })}
-          />
-          <Toggle
-            label="Flood warnings (England)"
-            value={settings.floodAlerts !== false}
-            onPress={() => updateSettings({ floodAlerts: settings.floodAlerts === false })}
-          />
-          <Toggle
-            label="Quiet overnight"
-            hint="Holds routine alerts between 11pm and 7am. A storm at Elevated or High risk still comes straight through."
-            value={settings.quietHours}
-            onPress={() => updateSettings({ quietHours: !settings.quietHours })}
-          />
+          </Card>
+        </>
+      ) : null}
 
-          {settings.notificationsEnabled && permission && !permission.granted ? (
-            <View style={styles.warnRow}>
-              <Text style={styles.warnText}>
-                Notifications are turned off for this app in your phone's settings, so alerts can't be delivered.
-              </Text>
-              <Pressable onPress={() => Linking.openSettings()}>
-                <Text style={styles.linkBtnText}>Open phone settings ↗</Text>
-              </Pressable>
+      {settings.holiday?.enabled ? (
+        <>
+          <SectionLabel>Holiday</SectionLabel>
+          <Card>
+            <StatRow
+              label="Accrued this period"
+              hint={`${settings.holiday.percent}% of the hours you worked — the standard accrual for 5.6 weeks' holiday`}
+              value={`${fmtHours(totals.holidayHours)}`}
+            />
+            <StatRow label="Worth roughly" value={fmtMoney(totals.holidayPay, settings.currency)} />
+          </Card>
+        </>
+      ) : null}
+
+      <SectionLabel>Take-home estimate</SectionLabel>
+      {deductions ? (
+        <Card>
+          <StatRow label="Gross" value={fmtMoney(deductions.gross, settings.currency)} />
+          {deductions.pension > 0 ? (
+            <StatRow
+              label={`Pension (${deductions.pensionPercent}%)`}
+              value={`−${fmtMoney(deductions.pension, settings.currency)}`}
+              tone={C.warn}
+            />
+          ) : null}
+          <StatRow
+            label="Income tax"
+            hint={`Tax-free allowance for this period: ${fmtMoney(deductions.periodAllowance, settings.currency)}`}
+            value={`−${fmtMoney(deductions.incomeTax, settings.currency)}`}
+            tone={C.warn}
+          />
+          <StatRow
+            label="National Insurance"
+            hint="Class 1, 8% above the primary threshold"
+            value={`−${fmtMoney(deductions.nationalInsurance, settings.currency)}`}
+            tone={C.warn}
+          />
+          {deductions.studentLoan > 0 ? (
+            <StatRow
+              label="Student loan"
+              value={`−${fmtMoney(deductions.studentLoan, settings.currency)}`}
+              tone={C.warn}
+            />
+          ) : null}
+          <Divider />
+          <StatRow label="Take-home" value={fmtMoney(deductions.net, settings.currency)} tone={C.accent} bold />
+          <Text style={styles.footnote}>
+            An estimate on this period alone, using {TAX_YEAR}{' '}
+            {settings.takeHome.region === 'scotland' ? 'Scottish' : 'UK'} rates and the standard personal
+            allowance — the income tax thresholds are frozen, so they still apply, but check gov.uk if a
+            payslip disagrees. Real PAYE is worked out across the whole tax year, so a quiet week after a busy
+            one usually comes back as a refund this can't see.
+          </Text>
+        </Card>
+      ) : (
+        <Card>
+          <Text style={styles.emptyBody}>
+            Turn on the take-home estimate in Settings to see roughly what lands in the bank after tax,
+            National Insurance, a workplace pension and a student loan.
+          </Text>
+          <Button label="Open settings" kind="secondary" onPress={onOpenSettings} style={{ marginTop: 12 }} />
+        </Card>
+      )}
+
+      <SectionLabel>Tax year {taxYearLabel()} so far</SectionLabel>
+      <Card>
+        <StatRow label="Gross since 6 April" value={fmtMoney(yearToDate.gross, settings.currency)} bold />
+        <StatRow label="Hours" value={fmtHours(yearToDate.hours)} />
+        <StatRow label="Shifts" value={String(yearToDate.count)} />
+        {yearToDate.overtimeHours > 0 ? (
+          <StatRow label="Of which overtime" value={fmtHours(yearToDate.overtimeHours)} tone={C.accent} />
+        ) : null}
+      </Card>
+
+      <View style={styles.detailButtons}>
+        <Button label="Share summary" kind="secondary" style={{ flex: 1 }} onPress={() => share('text')} />
+        <Button label="Share as CSV" kind="secondary" style={{ flex: 1 }} onPress={() => share('csv')} />
+      </View>
+
+      {shared ? (
+        <Card style={{ marginTop: 12 }}>
+          <Text style={styles.footnote}>Sharing isn't available here — copy the text below.</Text>
+          <Text selectable style={styles.pre}>
+            {shared}
+          </Text>
+          <Button label="Hide" kind="ghost" onPress={() => setShared(null)} />
+        </Card>
+      ) : null}
+    </ScrollView>
+  );
+}
+
+function SettingsScreen({ settings, update, shiftCount, onClearShifts }) {
+  const [confirmClear, setConfirmClear] = useState(false);
+  const group = (key, patch) => update({ [key]: { ...settings[key], ...patch } });
+
+  const updateJob = (id, patch) =>
+    update({ jobs: settings.jobs.map((job) => (job.id === id ? { ...job, ...patch } : job)) });
+
+  const addJob = () => {
+    const id = newId('job');
+    update({
+      jobs: [
+        ...settings.jobs,
+        { id, name: `Job ${settings.jobs.length + 1}`, rate: settings.jobs[0]?.rate || 12.21, color: JOB_COLORS[settings.jobs.length % JOB_COLORS.length] },
+      ],
+    });
+  };
+
+  const removeJob = (id) => {
+    const jobs = settings.jobs.filter((job) => job.id !== id);
+    update({ jobs, defaultJobId: jobs.some((job) => job.id === settings.defaultJobId) ? settings.defaultJobId : jobs[0].id });
+  };
+
+  const payPeriod = settings.payPeriod;
+
+  return (
+    <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <SectionLabel>Jobs and rates</SectionLabel>
+      {settings.jobs.map((job) => (
+        <Card key={job.id}>
+          <View style={styles.jobHead}>
+            <View style={[styles.jobDot, { backgroundColor: job.color || C.accent }]} />
+            <TextField
+              value={job.name}
+              onChange={(name) => updateJob(job.id, { name })}
+              placeholder="Job name"
+              style={{ flex: 1 }}
+            />
+          </View>
+          <View style={[styles.settingRow, { marginTop: 12 }]}>
+            <Text style={styles.rowLabel}>Hourly rate</Text>
+            <NumberField
+              value={job.rate}
+              onChange={(rate) => updateJob(job.id, { rate })}
+              step={0.25}
+              min={0}
+              max={999}
+              prefix={settings.currency}
+              width={92}
+            />
+          </View>
+          {settings.jobs.length > 1 ? (
+            <View style={styles.detailButtons}>
+              <Button
+                label={settings.defaultJobId === job.id ? 'Default job' : 'Make default'}
+                kind={settings.defaultJobId === job.id ? 'secondary' : 'ghost'}
+                style={{ flex: 1 }}
+                onPress={() => update({ defaultJobId: job.id })}
+              />
+              <Button label="Remove" kind="danger" style={{ flex: 1 }} onPress={() => removeJob(job.id)} />
             </View>
           ) : null}
+        </Card>
+      ))}
+      <Button label="+ Add another job" kind="secondary" onPress={addJob} />
 
-          <Pressable style={styles.testBtn} onPress={sendTest}>
-            <Text style={styles.testBtnText}>
-              {testSent ? '✅ Test notification sent' : '🔔 Send a test notification'}
+      <SectionLabel style={{ marginTop: 22 }}>New shifts start as</SectionLabel>
+      <Card>
+        <View style={styles.settingRow}>
+          <Text style={styles.rowLabel}>Start</Text>
+          <TimeField value={settings.defaultStart} onChange={(defaultStart) => update({ defaultStart })} clock24={settings.clock24} />
+        </View>
+        <View style={styles.settingRow}>
+          <Text style={styles.rowLabel}>Finish</Text>
+          <TimeField value={settings.defaultEnd} onChange={(defaultEnd) => update({ defaultEnd })} clock24={settings.clock24} />
+        </View>
+        <View style={styles.settingRow}>
+          <Text style={styles.rowLabel}>Unpaid break</Text>
+          <NumberField
+            value={settings.defaultBreakMins}
+            onChange={(defaultBreakMins) => update({ defaultBreakMins })}
+            step={5}
+            min={0}
+            max={480}
+            suffix="min"
+            decimals={0}
+            width={72}
+          />
+        </View>
+      </Card>
+
+      <SectionLabel style={{ marginTop: 22 }}>Pay period</SectionLabel>
+      <Card>
+        <Segmented
+          options={PERIOD_TYPES.map((type) => ({ id: type.id, label: type.label }))}
+          value={payPeriod.type}
+          onChange={(type) => group('payPeriod', { type })}
+        />
+        {payPeriod.type === 'monthly' ? (
+          <View style={[styles.settingRow, { marginTop: 14 }]}>
+            <View style={{ flex: 1, paddingRight: 12 }}>
+              <Text style={styles.rowLabel}>Period starts on the</Text>
+              <Text style={styles.rowHint}>Set this to the day after your usual pay day</Text>
+            </View>
+            <NumberField
+              value={payPeriod.monthStartDay}
+              onChange={(monthStartDay) => group('payPeriod', { monthStartDay })}
+              step={1}
+              min={1}
+              max={28}
+              decimals={0}
+              width={56}
+            />
+          </View>
+        ) : (
+          <>
+            <Text style={[styles.rowHint, { marginTop: 14, marginBottom: 8 }]}>Week runs from</Text>
+            <ChipRow>
+              {DAY_SHORT.map((day, index) => (
+                <Chip
+                  key={day}
+                  label={day}
+                  selected={payPeriod.weekStart === index}
+                  onPress={() => group('payPeriod', { weekStart: index })}
+                />
+              ))}
+            </ChipRow>
+          </>
+        )}
+        {payPeriod.type === 'fortnightly' ? (
+          <View style={{ marginTop: 14 }}>
+            <Text style={styles.rowHint}>
+              Fortnights are counted from {fmtDateLong(payPeriod.anchor)}. If the app has landed on the wrong
+              week, nudge it across by one.
             </Text>
-          </Pressable>
+            <Button
+              label="Shift fortnights by a week"
+              kind="secondary"
+              style={{ marginTop: 10 }}
+              onPress={() => group('payPeriod', { anchor: addDaysISO(payPeriod.anchor, 7) })}
+            />
+          </View>
+        ) : null}
+      </Card>
 
-          {Object.keys(muted).length ? (
-            <View style={styles.mutedWrap}>
-              <Text style={styles.detailHeading}>Muted storms</Text>
-              {Object.entries(muted).map(([id, until]) => {
-                const storm = assessed.find((a) => a.storm.id === id)?.storm;
+      <SectionLabel style={{ marginTop: 22 }}>Overtime</SectionLabel>
+      <Card>
+        <SwitchRow
+          label="Daily overtime"
+          hint={`Hours past ${settings.overtime.dailyAfterHours}h in a single shift`}
+          value={settings.overtime.dailyEnabled}
+          onChange={(dailyEnabled) => group('overtime', { dailyEnabled })}
+        />
+        {settings.overtime.dailyEnabled ? (
+          <>
+            <View style={styles.settingRow}>
+              <Text style={styles.rowLabel}>After</Text>
+              <NumberField
+                value={settings.overtime.dailyAfterHours}
+                onChange={(dailyAfterHours) => group('overtime', { dailyAfterHours })}
+                step={0.5}
+                min={0}
+                max={24}
+                suffix="h"
+                width={78}
+              />
+            </View>
+            <View style={styles.settingRow}>
+              <Text style={styles.rowLabel}>Paid at</Text>
+              <NumberField
+                value={settings.overtime.dailyMultiplier}
+                onChange={(dailyMultiplier) => group('overtime', { dailyMultiplier })}
+                step={0.25}
+                min={1}
+                max={5}
+                suffix="×"
+                width={78}
+              />
+            </View>
+          </>
+        ) : null}
+        <Divider />
+        <SwitchRow
+          label="Weekly overtime"
+          hint={`Hours past ${settings.overtime.weeklyAfterHours}h in one week, counted across every job`}
+          value={settings.overtime.weeklyEnabled}
+          onChange={(weeklyEnabled) => group('overtime', { weeklyEnabled })}
+        />
+        {settings.overtime.weeklyEnabled ? (
+          <>
+            <View style={styles.settingRow}>
+              <Text style={styles.rowLabel}>After</Text>
+              <NumberField
+                value={settings.overtime.weeklyAfterHours}
+                onChange={(weeklyAfterHours) => group('overtime', { weeklyAfterHours })}
+                step={1}
+                min={0}
+                max={168}
+                suffix="h"
+                width={78}
+              />
+            </View>
+            <View style={styles.settingRow}>
+              <Text style={styles.rowLabel}>Paid at</Text>
+              <NumberField
+                value={settings.overtime.weeklyMultiplier}
+                onChange={(weeklyMultiplier) => group('overtime', { weeklyMultiplier })}
+                step={0.25}
+                min={1}
+                max={5}
+                suffix="×"
+                width={78}
+              />
+            </View>
+            <Text style={[styles.rowHint, { marginTop: 8 }]}>Overtime week starts on</Text>
+            <ChipRow style={{ marginTop: 8 }}>
+              {DAY_SHORT.map((day, index) => (
+                <Chip
+                  key={day}
+                  label={day}
+                  selected={settings.overtime.weekStart === index}
+                  onPress={() => group('overtime', { weekStart: index })}
+                />
+              ))}
+            </ChipRow>
+          </>
+        ) : null}
+      </Card>
+
+      <SectionLabel style={{ marginTop: 22 }}>Night and weekend rates</SectionLabel>
+      <Card>
+        <SwitchRow
+          label="Night premium"
+          hint="Extra for hours inside the night window, split to the minute"
+          value={settings.night.enabled}
+          onChange={(enabled) => group('night', { enabled })}
+        />
+        {settings.night.enabled ? (
+          <>
+            <View style={styles.settingRow}>
+              <Text style={styles.rowLabel}>From</Text>
+              <TimeField value={settings.night.start} onChange={(start) => group('night', { start })} clock24={settings.clock24} />
+            </View>
+            <View style={styles.settingRow}>
+              <Text style={styles.rowLabel}>Until</Text>
+              <TimeField value={settings.night.end} onChange={(end) => group('night', { end })} clock24={settings.clock24} />
+            </View>
+            <PremiumValue
+              premium={settings.night}
+              currency={settings.currency}
+              onChange={(patch) => group('night', patch)}
+            />
+          </>
+        ) : null}
+        <Divider />
+        <SwitchRow
+          label="Weekend premium"
+          value={settings.weekend.enabled}
+          onChange={(enabled) => group('weekend', { enabled })}
+        />
+        {settings.weekend.enabled ? (
+          <>
+            <Text style={[styles.rowHint, { marginTop: 6, marginBottom: 8 }]}>Days that count as weekend</Text>
+            <ChipRow>
+              {DAY_SHORT.map((day, index) => {
+                const selected = settings.weekend.days.includes(index);
                 return (
-                  <Pressable key={id} style={styles.mutedRow} onPress={() => unmute(id)}>
-                    <Text style={styles.cardBody}>
-                      {storm ? storm.name : id.toUpperCase()} · quiet until{' '}
-                      {new Date(until).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-                    </Text>
-                    <Text style={styles.toggleValue}>Unmute</Text>
-                  </Pressable>
+                  <Chip
+                    key={day}
+                    label={day}
+                    selected={selected}
+                    onPress={() =>
+                      group('weekend', {
+                        days: selected
+                          ? settings.weekend.days.filter((d) => d !== index)
+                          : [...settings.weekend.days, index].sort(),
+                      })
+                    }
+                  />
                 );
               })}
+            </ChipRow>
+            <PremiumValue
+              premium={settings.weekend}
+              currency={settings.currency}
+              onChange={(patch) => group('weekend', patch)}
+            />
+          </>
+        ) : null}
+        <Text style={styles.footnote}>
+          Premiums don't stack: if an hour is both night and weekend, the better-paid of the two applies.
+          Overtime then multiplies whatever that hour was already worth.
+        </Text>
+      </Card>
+
+      <SectionLabel style={{ marginTop: 22 }}>Holiday accrual</SectionLabel>
+      <Card>
+        <SwitchRow
+          label="Track holiday building up"
+          hint="12.07% is the usual figure for hourly work — 5.6 weeks' holiday spread over the weeks you actually work"
+          value={settings.holiday.enabled}
+          onChange={(enabled) => group('holiday', { enabled })}
+        />
+        {settings.holiday.enabled ? (
+          <View style={styles.settingRow}>
+            <Text style={styles.rowLabel}>Accrual rate</Text>
+            <NumberField
+              value={settings.holiday.percent}
+              onChange={(percent) => group('holiday', { percent })}
+              step={0.01}
+              min={0}
+              max={100}
+              suffix="%"
+              width={86}
+            />
+          </View>
+        ) : null}
+      </Card>
+
+      <SectionLabel style={{ marginTop: 22 }}>Take-home estimate</SectionLabel>
+      <Card>
+        <SwitchRow
+          label="Estimate tax and National Insurance"
+          hint={`${TAX_YEAR} rates, worked out on one pay period at a time`}
+          value={settings.takeHome.enabled}
+          onChange={(enabled) => group('takeHome', { enabled })}
+        />
+        {settings.takeHome.enabled ? (
+          <>
+            <Text style={[styles.rowHint, { marginTop: 10, marginBottom: 8 }]}>Where you pay tax</Text>
+            <Segmented
+              options={REGIONS.map((region) => ({ id: region.id, label: region.label }))}
+              value={settings.takeHome.region}
+              onChange={(region) => group('takeHome', { region })}
+            />
+            <View style={[styles.settingRow, { marginTop: 12 }]}>
+              <View style={{ flex: 1, paddingRight: 12 }}>
+                <Text style={styles.rowLabel}>Workplace pension</Text>
+                <Text style={styles.rowHint}>Your own contribution, taken before tax</Text>
+              </View>
+              <NumberField
+                value={settings.takeHome.pensionPercent}
+                onChange={(pensionPercent) => group('takeHome', { pensionPercent })}
+                step={0.5}
+                min={0}
+                max={100}
+                suffix="%"
+                width={80}
+              />
             </View>
-          ) : null}
+            <Text style={[styles.rowHint, { marginTop: 10, marginBottom: 8 }]}>Student loan</Text>
+            <ChipRow>
+              {STUDENT_LOAN_PLANS.map((plan) => (
+                <Chip
+                  key={plan.id}
+                  label={plan.label}
+                  selected={settings.takeHome.studentLoan === plan.id}
+                  onPress={() => group('takeHome', { studentLoan: plan.id })}
+                />
+              ))}
+            </ChipRow>
+          </>
+        ) : null}
+      </Card>
 
-          <Text style={styles.smallNote}>
-            Storm alerts arrive as time-sensitive notifications when a storm is at Elevated or High risk, so they break
-            through Focus modes; everything else is a normal alert. Each storm alert has a "Mute for 24h" button if a
-            system is lingering{inQuietHours(now, settings) ? ' · quiet hours are active right now' : ''}.
-          </Text>
-          <Text style={styles.smallNote}>
-            Data refreshes every 10 minutes while the app is open and each time you come back to it. The installed
-            (TestFlight) app also checks periodically while closed — iOS decides the exact timing, so keep Background
-            App Refresh on. In Expo Go, checks only run while the app is open.
-          </Text>
-        </View>
-
-        <Text style={styles.sectionTitle}>Home Screen widget</Text>
-        <View style={styles.card}>
-          <Text style={styles.cardBody}>
-            Add the Atlantic Storm Watch widget to see the highest UK risk without opening the app: long-press your
-            Home Screen → <Text style={styles.bold}>+</Text> → search for Storm Watch. The small size shows the risk
-            band and the storm behind it, the medium size adds the closest approach and the next windy UK day, and
-            there are Lock Screen versions too.
-          </Text>
-          <Text style={styles.smallNote}>
-            The widget shows whatever the app last worked out. It updates every time the app refreshes — including the
-            background checks while the app is closed — so keep Background App Refresh on to stop it going stale.
-            Widgets need the installed build; they don't appear in Expo Go.
-          </Text>
-        </View>
-
-        <Text style={styles.sectionTitle}>How the UK prediction works</Text>
-        <View style={styles.card}>
-          <Text style={styles.cardBody}>
-            Each storm's official NHC forecast track (out to 5 days) is extended along the heading and speed of its
-            final leg — the path a storm follows once the jet stream picks it up. The app then measures how close that
-            combined path comes to the UK, how well it is aimed at us, whether it is recurving north-east, and how
-            strong it is, and turns that into the risk score.
-          </Text>
-          <Text style={styles.smallNote}>
-            The dashed part of every track, and anything beyond day 5, is the app's own extrapolation — not an NHC
-            forecast. Storms that reach us have almost always stopped being hurricanes by then and arrive as
-            ex-hurricane windstorms: strong wind and rain rather than a hurricane landfall. Treat the score as "how
-            much attention is this worth today", not a forecast of what will happen.
-          </Text>
-        </View>
-
-        <Text style={styles.sectionTitle}>Data sources</Text>
-        <View style={styles.card}>
-          <SourceLine
-            ok={!!picture?.stormsOk}
-            label="NHC CurrentStorms.json — active storm positions & intensity"
+      <SectionLabel style={{ marginTop: 22 }}>Display</SectionLabel>
+      <Card>
+        <SwitchRow
+          label="24-hour clock"
+          value={settings.clock24}
+          onChange={(clock24) => update({ clock24 })}
+        />
+        <View style={styles.settingRow}>
+          <Text style={styles.rowLabel}>Currency symbol</Text>
+          <TextField
+            value={settings.currency}
+            onChange={(currency) => update({ currency: currency.slice(0, 3) })}
+            style={{ width: 72, textAlign: 'center' }}
           />
-          <SourceLine
-            ok={assessed.some((a) => a.track)}
-            label="NHC forecast/advisory (TCM) — official 5-day forecast tracks"
-          />
-          <SourceLine ok={areas.length > 0 || !!picture?.outlook?.body} label="NHC tropical weather outlook — formation chances" />
-          <SourceLine ok={!!wind} label="Open-Meteo — 16-day UK wind and gust forecast" />
-          <SourceLine ok={!!picture?.warnings} label="MeteoAlarm — official Met Office weather warnings" />
-          <SourceLine ok={!!picture?.floods} label="Environment Agency — live flood warnings (England)" />
-          <SourceLine ok={!!picture?.lows?.gridOk} label="Open-Meteo grid scan — deep Atlantic lows & ex-hurricanes" />
-          {picture?.errors?.length ? (
-            <Text style={styles.smallNote}>Last refresh issues: {picture.errors.slice(0, 3).join(' · ')}</Text>
-          ) : null}
-          <Text style={styles.smallNote}>
-            Advisories are issued every 6 hours (03/09/15/21 UTC) with intermediate updates in between, so positions
-            can be up to ~3 hours old.
-          </Text>
-          <Text style={[styles.smallNote, styles.emergency]}>
-            Not an official warning service. For UK weather warnings use the Met Office; for tropical cyclone
-            advisories use the National Hurricane Center. In an emergency call 999.
-          </Text>
-          <Pressable onPress={() => Linking.openURL('https://www.metoffice.gov.uk/weather/warnings-and-advice/uk-warnings')}>
-            <Text style={styles.linkBtnText}>Met Office UK weather warnings ↗</Text>
-          </Pressable>
         </View>
-      </ScrollView>
-    </View>
+      </Card>
+
+      <SectionLabel style={{ marginTop: 22 }}>Your data</SectionLabel>
+      <Card>
+        <Text style={styles.emptyBody}>
+          {shiftCount} {shiftCount === 1 ? 'shift is' : 'shifts are'} stored on this phone and nowhere else.
+          There's no account and no server — deleting the app deletes them.
+        </Text>
+        <Button
+          label={confirmClear ? 'Tap again to delete every shift' : 'Delete all shifts'}
+          kind="danger"
+          style={{ marginTop: 14 }}
+          onPress={() => {
+            if (confirmClear) {
+              onClearShifts();
+              setConfirmClear(false);
+            } else {
+              setConfirmClear(true);
+            }
+          }}
+        />
+      </Card>
+
+      <Text style={styles.footnote}>
+        Shift Pay works out what you should be paid from what you tell it. It isn't payroll: your employer's
+        rounding, salary sacrifice, an unusual tax code or a pay rise part-way through a period will all move
+        the real figure. Use it to check a payslip, not to replace one.
+      </Text>
+    </ScrollView>
   );
 }
 
-function confidenceSentence(risk) {
-  if (risk.confidence === 'high') return 'This is inside the official NHC forecast.';
-  if (risk.confidence === 'medium') return "That part of the track is the app's own extrapolation, so it could easily shift.";
-  return 'Very low confidence at this range — worth watching, nothing more.';
-}
-
-function StormCard({ storm, risk, now, open, onToggle, muted }) {
-  const cat = saffirSimpson(storm.windKt);
-  const accent = stormColor(storm);
-  const closestTime = risk.closest?.point?.time;
-  return (
-    <Pressable onPress={onToggle} style={[styles.stormCard, { borderColor: accent }]}>
-      <View style={styles.stormTop}>
-        <View style={styles.stormNameWrap}>
-          <Text style={styles.stormName}>{storm.name}</Text>
-          <Text style={styles.stormType}>
-            {cat ? `Category ${cat} hurricane` : classificationLabel(storm.classification)}
-            {muted ? ' · 🔕 muted' : ''}
-          </Text>
-        </View>
-        <View style={[styles.riskPill, { backgroundColor: risk.color }]}>
-          <Text style={styles.riskPillText}>UK {risk.band}</Text>
-        </View>
-      </View>
-
-      <Text style={styles.stormMeta}>
-        {Math.round(ktToMph(storm.windKt))} mph sustained
-        {storm.pressureMb ? ` · ${storm.pressureMb} mb` : ''}
-        {storm.movementDir != null && storm.movementSpeedKt
-          ? ` · moving ${compassPoint(storm.movementDir)} at ${Math.round(ktToMph(storm.movementSpeedKt))} mph`
-          : ''}
-      </Text>
-      <Text style={styles.stormMeta}>
-        {fmtLatLon(storm.lat, storm.lon)} · {Math.round(risk.currentDistanceMiles).toLocaleString()} miles from the UK
-        {storm.lastUpdate ? ` · ${timeAgoLabel(storm.lastUpdate, now)}` : ''}
-      </Text>
-
-      <View style={styles.scoreRow}>
-        <View style={styles.scoreTrack}>
-          <View style={[styles.scoreFill, { width: `${Math.max(3, risk.score)}%`, backgroundColor: risk.color }]} />
-        </View>
-        <Text style={styles.scoreText}>{risk.score}/100</Text>
-      </View>
-      <Text style={styles.stormBlurb}>
-        {risk.blurb}
-        {closestTime && risk.closest.miles <= 2000
-          ? ` · closest approach ~${Math.round(risk.closest.miles).toLocaleString()} mi from ${risk.closest.place} ${leadTimeLabel(closestTime, now)}`
-          : ''}
-      </Text>
-
-      {open ? (
-        <View style={styles.stormDetail}>
-          <Text style={styles.detailHeading}>Why this score</Text>
-          {risk.reasons.map((r, i) => (
-            <Text key={i} style={styles.detailLine}>
-              • {r}
-            </Text>
-          ))}
-          <Text style={styles.detailHeading}>
-            Official NHC forecast track{risk.confidence === 'low' && !risk.official.length ? ' (unavailable)' : ''}
-          </Text>
-          {risk.official.map((p, i) => (
-            <Text key={i} style={styles.detailLine}>
-              {p.hour === 0 ? 'now' : `+${p.hour}h`} · {fmtLatLon(p.lat, p.lon)}
-              {isFinite(p.windKt) ? ` · ${Math.round(ktToMph(p.windKt))} mph` : ''}
-              {p.note ? ` · ${p.note.toLowerCase()}` : ''}
-              {p.extrapolated ? ' · estimated' : ''}
-            </Text>
-          ))}
-          {risk.projected.length ? (
-            <Text style={styles.detailLine}>
-              {'\n'}Then extrapolated by the app to {fmtLatLon(risk.projected[risk.projected.length - 1].lat, risk.projected[risk.projected.length - 1].lon)} by{' '}
-              {fmtDayLabel(risk.projected[risk.projected.length - 1].time)}.
-            </Text>
-          ) : null}
-          {storm.advisoryUrl ? (
-            <Pressable onPress={() => Linking.openURL(storm.advisoryUrl)}>
-              <Text style={styles.linkBtnText}>Read the full NHC advisory ↗</Text>
-            </Pressable>
-          ) : null}
-          {storm.conePngUrl ? (
-            <Pressable onPress={() => Linking.openURL(storm.conePngUrl)}>
-              <Text style={styles.linkBtnText}>Official forecast cone graphic ↗</Text>
-            </Pressable>
-          ) : null}
-        </View>
-      ) : (
-        <Text style={styles.tapHint}>Tap for the forecast track and how this was worked out</Text>
-      )}
-    </Pressable>
-  );
-}
-
-function OutlookCard({ area }) {
-  const level = outlookWatchLevel(area);
-  return (
-    <View style={styles.card}>
-      <View style={styles.cardHeaderRow}>
-        <Text style={styles.cardTitle}>{area.title}</Text>
-        <View style={[styles.ratingPill, { backgroundColor: level.color }]}>
-          <Text style={styles.ratingText}>{Math.max(area.chance7 ?? 0, area.chance48 ?? 0)}%</Text>
-        </View>
-      </View>
-      <ChanceBar label="Next 2 days" value={area.chance48} />
-      <ChanceBar label="Next 7 days" value={area.chance7} />
-      <Text style={styles.cardBody} numberOfLines={6}>
-        {area.text}
-      </Text>
-      <Text style={styles.smallNote}>
-        {area.ukRelevant
-          ? `${area.region} — systems that develop here are the ones that can later recurve towards Europe, though most do not.`
-          : `${area.region} — systems here almost always stay well to our west.`}
-      </Text>
-    </View>
-  );
-}
-
-function ChanceBar({ label, value }) {
-  if (value == null) return null;
-  const color = value >= 70 ? '#dc2626' : value >= 40 ? '#ea580c' : value >= 20 ? '#d4a72c' : '#4b8f6f';
-  return (
-    <View style={styles.chanceRow}>
-      <Text style={styles.chanceLabel}>{label}</Text>
-      <View style={styles.chanceTrack}>
-        <View style={[styles.chanceFill, { width: `${Math.max(2, value)}%`, backgroundColor: color }]} />
-      </View>
-      <Text style={styles.chanceValue}>{value}%</Text>
-    </View>
-  );
-}
-
-function SeasonStats({ assessed, seasonLog, now }) {
-  const count = seasonStormNumber(assessed, seasonLog);
-  const avg = climatologyToDate(now);
-  const activity = seasonActivityLabel(count, avg);
-  const toPeak = daysToPeak(now);
+function PremiumValue({ premium, currency, onChange }) {
   return (
     <>
-      <View style={styles.cardHeaderRow}>
-        <Text style={styles.cardTitle}>
-          {count} system{count === 1 ? '' : 's'} so far · normal for the date is ~{avg.toFixed(1)}
-        </Text>
-        <View style={[styles.ratingPill, { backgroundColor: activity.color }]}>
-          <Text style={styles.ratingText}>{activity.label}</Text>
-        </View>
+      <Text style={[styles.rowHint, { marginTop: 12, marginBottom: 8 }]}>Paid as</Text>
+      <Segmented
+        options={[
+          { id: 'plus', label: `Extra ${currency}/hour` },
+          { id: 'multiply', label: 'Multiple of rate' },
+        ]}
+        value={premium.mode}
+        onChange={(mode) => onChange({ mode })}
+      />
+      <View style={[styles.settingRow, { marginTop: 12 }]}>
+        <Text style={styles.rowLabel}>{premium.mode === 'plus' ? 'Extra per hour' : 'Rate multiplied by'}</Text>
+        <NumberField
+          value={premium.value}
+          onChange={(value) => onChange({ value })}
+          step={premium.mode === 'plus' ? 0.25 : 0.1}
+          min={premium.mode === 'plus' ? 0 : 1}
+          max={99}
+          prefix={premium.mode === 'plus' ? currency : undefined}
+          suffix={premium.mode === 'plus' ? undefined : '×'}
+          width={92}
+        />
       </View>
-      <Text style={styles.cardBody}>
-        {toPeak > 0
-          ? `The climatological peak of the season is 10 September — ${toPeak} days away, so the busiest stretch is still to come.`
-          : toPeak > -30
-          ? 'We are right around the September peak of the season — the busiest few weeks of the year.'
-          : 'Past the September peak — activity normally winds down from here.'}
-      </Text>
-      <Text style={styles.smallNote}>
-        System count is inferred from NHC storm numbering (it includes depressions, so it can run slightly ahead of the
-        named-storm count). Climatology is the 1991–2020 average.
-      </Text>
     </>
   );
 }
 
-function Toggle({ label, value, onPress, hint }) {
+const BREAK_CHOICES = [0, 15, 20, 30, 45, 60];
+
+function ShiftEditor({ draft, settings, shifts, onChange, onSave, onDelete, onClose }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  useEffect(() => setConfirmDelete(false), [draft?.id]);
+
+  const isExisting = !!draft && shifts.some((shift) => shift.id === draft.id);
+
+  // Preview the draft in the context of every other shift, so weekly
+  // overtime shows up while you're still typing.
+  const preview = useMemo(() => {
+    if (!draft) return null;
+    const others = shifts.filter((shift) => shift.id !== draft.id);
+    return computeShifts([...others, draft], settings).find((result) => result.id === draft.id) || null;
+  }, [draft, shifts, settings]);
+
+  const clashes = useMemo(() => (draft ? overlappingShifts(draft, shifts) : []), [draft, shifts]);
+
+  const set = (patch) => onChange({ ...draft, ...patch });
+  const job = draft ? settings.jobs.find((item) => item.id === draft.jobId) : null;
+  const usingOverride = !!draft && Number.isFinite(Number(draft.rate)) && Number(draft.rate) > 0;
+
   return (
-    <Pressable style={styles.toggleRow} onPress={onPress}>
-      <View style={styles.toggleLabelWrap}>
-        <Text style={styles.cardBody}>{label}</Text>
-        {hint ? <Text style={styles.toggleHint}>{hint}</Text> : null}
+    <Modal visible={!!draft} animationType="slide" transparent={false} onRequestClose={onClose}>
+      <View style={styles.root}>
+        <StatusBar style="light" />
+        <SafeAreaView style={styles.safe}>
+          <View style={styles.header}>
+            <Text style={styles.brand}>{isExisting ? 'Edit shift' : 'New shift'}</Text>
+            <Pressable onPress={onClose} style={({ pressed }) => [styles.closeBtn, pressed && { opacity: 0.6 }]}>
+              <Text style={styles.closeText}>Cancel</Text>
+            </Pressable>
+          </View>
+
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+            <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+              {draft ? (
+                <>
+                  <Card>
+                    <View style={styles.dateRow}>
+                      <Pressable
+                        onPress={() => set({ date: addDaysISO(draft.date, -1) })}
+                        style={({ pressed }) => [styles.arrow, pressed && { opacity: 0.6 }]}
+                      >
+                        <Text style={styles.arrowText}>‹</Text>
+                      </Pressable>
+                      <View style={{ flex: 1, alignItems: 'center' }}>
+                        <Text style={styles.dateBig}>{fmtDateLong(draft.date)}</Text>
+                        <Text style={styles.rowHint}>{relativeDayLabel(draft.date) || draft.date}</Text>
+                      </View>
+                      <Pressable
+                        onPress={() => set({ date: addDaysISO(draft.date, 1) })}
+                        style={({ pressed }) => [styles.arrow, pressed && { opacity: 0.6 }]}
+                      >
+                        <Text style={styles.arrowText}>›</Text>
+                      </Pressable>
+                    </View>
+                    <ChipRow style={{ marginTop: 12, justifyContent: 'center' }}>
+                      <Chip label="Today" selected={draft.date === todayISO()} onPress={() => set({ date: todayISO() })} />
+                      <Chip
+                        label="Yesterday"
+                        selected={draft.date === addDaysISO(todayISO(), -1)}
+                        onPress={() => set({ date: addDaysISO(todayISO(), -1) })}
+                      />
+                    </ChipRow>
+                  </Card>
+
+                  <Card>
+                    <View style={styles.settingRow}>
+                      <Text style={styles.rowLabel}>Started</Text>
+                      <TimeField value={draft.start} onChange={(start) => set({ start })} clock24={settings.clock24} />
+                    </View>
+                    <View style={styles.settingRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.rowLabel}>Finished</Text>
+                        {preview?.crossesMidnight ? <Text style={styles.rowHint}>Runs into the next day</Text> : null}
+                      </View>
+                      <TimeField value={draft.end} onChange={(end) => set({ end })} clock24={settings.clock24} />
+                    </View>
+                    <Divider />
+                    <Text style={[styles.rowLabel, { marginBottom: 10 }]}>Unpaid break</Text>
+                    <ChipRow>
+                      {BREAK_CHOICES.map((mins) => (
+                        <Chip
+                          key={mins}
+                          label={mins === 0 ? 'None' : `${mins}m`}
+                          selected={draft.breakMins === mins}
+                          onPress={() => set({ breakMins: mins })}
+                        />
+                      ))}
+                    </ChipRow>
+                    <View style={styles.settingRow}>
+                      <Text style={styles.rowHint}>or set it exactly</Text>
+                      <NumberField
+                        value={draft.breakMins}
+                        onChange={(breakMins) => set({ breakMins })}
+                        step={5}
+                        min={0}
+                        max={720}
+                        suffix="min"
+                        decimals={0}
+                        width={72}
+                      />
+                    </View>
+                  </Card>
+
+                  {settings.jobs.length > 1 ? (
+                    <Card>
+                      <Text style={[styles.rowLabel, { marginBottom: 10 }]}>Job</Text>
+                      <ChipRow>
+                        {settings.jobs.map((item) => (
+                          <Chip
+                            key={item.id}
+                            label={item.name}
+                            tone={item.color}
+                            selected={draft.jobId === item.id}
+                            onPress={() => set({ jobId: item.id })}
+                          />
+                        ))}
+                      </ChipRow>
+                    </Card>
+                  ) : null}
+
+                  <Card>
+                    <SwitchRow
+                      label="Different rate for this shift"
+                      hint={
+                        usingOverride
+                          ? 'Overrides the job rate for this shift only'
+                          : `Normally ${fmtRate(job?.rate || 0, settings.currency)}`
+                      }
+                      value={usingOverride}
+                      onChange={(on) => set({ rate: on ? job?.rate || 0 : null })}
+                    />
+                    {usingOverride ? (
+                      <View style={styles.settingRow}>
+                        <Text style={styles.rowLabel}>Rate for this shift</Text>
+                        <NumberField
+                          value={Number(draft.rate)}
+                          onChange={(rate) => set({ rate })}
+                          step={0.25}
+                          min={0}
+                          max={999}
+                          prefix={settings.currency}
+                          width={92}
+                        />
+                      </View>
+                    ) : null}
+                    <Divider />
+                    <Text style={[styles.rowLabel, { marginBottom: 8 }]}>Note</Text>
+                    <TextField
+                      value={draft.note}
+                      onChange={(note) => set({ note })}
+                      placeholder="Ward, site, who you covered for…"
+                    />
+                  </Card>
+
+                  {clashes.length ? (
+                    <Card tone="alt">
+                      <Text style={[styles.rowLabel, { color: C.warn }]}>
+                        This overlaps {clashes.length === 1 ? 'a shift' : `${clashes.length} shifts`} you've
+                        already logged
+                      </Text>
+                      <Text style={styles.rowHint}>
+                        {clashes
+                          .map((clash) => `${dayLabel(clash.date)} ${fmtTime(parseTimeInput(clash.start) ?? 0, settings.clock24)}`)
+                          .join(', ')}
+                        . Save it anyway if you really did work both.
+                      </Text>
+                    </Card>
+                  ) : null}
+
+                  {preview ? (
+                    <Card>
+                      <Text style={styles.previewPay}>{fmtMoney(preview.gross, settings.currency)}</Text>
+                      <Text style={styles.rowHint}>
+                        {fmtHours(preview.hours)} paid
+                        {preview.breakMins ? ` after a ${preview.breakMins} minute break` : ''}
+                        {preview.hours > 0 ? ` · ${fmtRate(preview.avgHourly, settings.currency)} average` : ''}
+                      </Text>
+                      {preview.segments.length > 1 || (preview.segments[0] && preview.segments[0].key !== KEY_BASIC) ? (
+                        <>
+                          <Divider />
+                          {preview.segments.map((seg) => (
+                            <StatRow
+                              key={`${seg.key}-${seg.otMult}-${seg.hourly}`}
+                              label={seg.label}
+                              hint={`${fmtHours(seg.hours)} at ${fmtRate(seg.hourly, settings.currency)}`}
+                              value={fmtMoney(seg.pay, settings.currency)}
+                              tone={seg.key === KEY_BASIC && seg.otMult === 1 ? undefined : C.accent}
+                            />
+                          ))}
+                        </>
+                      ) : null}
+                      {preview.hours === 0 ? (
+                        <Text style={[styles.rowHint, { color: C.warn, marginTop: 6 }]}>
+                          Nothing paid: check the times and the break.
+                        </Text>
+                      ) : null}
+                    </Card>
+                  ) : null}
+
+                  <Button label={isExisting ? 'Save changes' : 'Add shift'} onPress={() => onSave(draft)} />
+                  {isExisting ? (
+                    <Button
+                      label={confirmDelete ? 'Tap again to delete' : 'Delete shift'}
+                      kind="danger"
+                      style={{ marginTop: 10 }}
+                      onPress={() => (confirmDelete ? onDelete(draft.id) : setConfirmDelete(true))}
+                    />
+                  ) : null}
+                </>
+              ) : null}
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
       </View>
-      <Text style={styles.toggleValue}>{value ? 'On 🔔' : 'Off 🔕'}</Text>
-    </Pressable>
+    </Modal>
   );
-}
-
-function SourceLine({ ok, label }) {
-  return (
-    <Text style={styles.sourceLine}>
-      {ok ? '🟢' : '🔴'} {label}
-    </Text>
-  );
-}
-
-function Stat({ label, value, color }) {
-  return (
-    <View style={styles.stat}>
-      <Text style={[styles.statValue, color ? { color } : null]}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
-  );
-}
-
-function fmtLatLon(lat, lon) {
-  return `${Math.abs(lat).toFixed(1)}°${lat >= 0 ? 'N' : 'S'} ${Math.abs(lon).toFixed(1)}°${lon >= 0 ? 'E' : 'W'}`;
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0e1420' },
-  scroll: { paddingTop: 60, paddingHorizontal: 16, paddingBottom: 48 },
-  header: { marginBottom: 14 },
-  title: { color: '#fff', fontSize: 26, fontWeight: '800' },
-  subtitle: { color: '#8b93a3', fontSize: 13, marginTop: 4 },
-
-  banner: { flexDirection: 'row', borderRadius: 14, padding: 14, alignItems: 'center' },
-  bannerIcon: { fontSize: 28, marginRight: 12 },
-  bannerText: { flex: 1 },
-  bannerTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  bannerBody: { color: 'rgba(255,255,255,0.85)', fontSize: 13, marginTop: 3, lineHeight: 18 },
-
-  linkBtnText: { color: '#7db4ff', fontSize: 13, textDecorationLine: 'underline', marginTop: 10 },
-
-  mapWrap: { marginTop: 14, borderRadius: 14, overflow: 'hidden' },
-  map: { width: '100%', height: 300 },
-  legend: {
-    position: 'absolute',
-    bottom: 8,
-    left: 8,
-    backgroundColor: 'rgba(10,14,20,0.75)',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+  root: { flex: 1, backgroundColor: C.bg },
+  safe: { flex: 1 },
+  centre: { alignItems: 'center', justifyContent: 'center' },
+  loading: { color: C.accent, fontSize: 22, fontWeight: '800', letterSpacing: 0.4 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'android' ? 18 : 8,
+    paddingBottom: 10,
   },
-  legendText: { color: '#dbe1ea', fontSize: 11 },
-
-  statsRow: { flexDirection: 'row', marginTop: 14, gap: 8 },
-  stat: { flex: 1, backgroundColor: '#18202f', borderRadius: 12, paddingVertical: 12, paddingHorizontal: 6, alignItems: 'center' },
-  statValue: { color: '#fff', fontSize: 18, fontWeight: '800' },
-  statLabel: { color: '#8b93a3', fontSize: 10, marginTop: 3, textAlign: 'center' },
-
-  sectionTitle: { color: '#fff', fontSize: 17, fontWeight: '700', marginTop: 22, marginBottom: 8 },
-  card: { backgroundColor: '#18202f', borderRadius: 14, padding: 14, marginTop: 8 },
-  cardHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-  cardTitle: { color: '#fff', fontSize: 15, fontWeight: '700', flex: 1, marginRight: 8 },
-  cardBody: { color: '#c6ccd8', fontSize: 14, lineHeight: 20 },
-  smallNote: { color: '#77808f', fontSize: 12, lineHeight: 17, marginTop: 10 },
-  emergency: { color: '#e0958a' },
-
-  ratingPill: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
-  ratingText: { color: '#101418', fontSize: 12, fontWeight: '800' },
-
-  stormCard: { backgroundColor: '#161d2b', borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderLeftWidth: 4 },
-  stormTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  stormNameWrap: { flex: 1, marginRight: 8 },
-  stormName: { color: '#fff', fontSize: 18, fontWeight: '800' },
-  stormType: { color: '#9fb0c9', fontSize: 13, marginTop: 2 },
-  riskPill: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
-  riskPillText: { color: '#fff', fontSize: 12, fontWeight: '800' },
-  stormMeta: { color: '#aab3c2', fontSize: 13, marginTop: 6, lineHeight: 18 },
-
-  scoreRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12 },
-  scoreTrack: { flex: 1, height: 8, borderRadius: 999, backgroundColor: '#232c3d', overflow: 'hidden' },
-  scoreFill: { height: 8, borderRadius: 999 },
-  scoreText: { color: '#c6ccd8', fontSize: 12, fontWeight: '700', marginLeft: 8, width: 56, textAlign: 'right' },
-  stormBlurb: { color: '#c6ccd8', fontSize: 13, marginTop: 8, lineHeight: 19 },
-  tapHint: { color: '#63708a', fontSize: 12, marginTop: 10 },
-
-  stormDetail: { marginTop: 12, borderTopWidth: 1, borderTopColor: '#242e42', paddingTop: 10 },
-  detailHeading: { color: '#fff', fontSize: 13, fontWeight: '700', marginTop: 10, marginBottom: 4 },
-  detailLine: { color: '#aab3c2', fontSize: 12.5, lineHeight: 19 },
-
-  chanceRow: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
-  chanceLabel: { color: '#9fb0c9', fontSize: 12, width: 84 },
-  chanceTrack: { flex: 1, height: 7, borderRadius: 999, backgroundColor: '#232c3d', overflow: 'hidden' },
-  chanceFill: { height: 7, borderRadius: 999 },
-  chanceValue: { color: '#c6ccd8', fontSize: 12, fontWeight: '700', marginLeft: 8, width: 38, textAlign: 'right' },
-
-  windRows: { marginTop: 12 },
-  windRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 5 },
-  windDay: { color: '#9fb0c9', fontSize: 12, width: 86 },
-  windBarTrack: { flex: 1, height: 9, borderRadius: 999, backgroundColor: '#232c3d', overflow: 'hidden' },
-  windBarFill: { height: 9, borderRadius: 999 },
-  windValue: { color: '#c6ccd8', fontSize: 12, fontWeight: '700', marginLeft: 8, width: 30, textAlign: 'right' },
-
-  chipRow: { flexDirection: 'row', marginTop: 10, gap: 8, flexWrap: 'wrap' },
-  chip: { borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7, backgroundColor: '#232c3d' },
-  chipActive: { backgroundColor: '#2f7fd4' },
-  chipText: { color: '#c6ccd8', fontSize: 13, fontWeight: '600' },
-  chipTextActive: { color: '#fff' },
-  toggleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 14 },
-  toggleLabelWrap: { flex: 1, marginRight: 12 },
-  toggleHint: { color: '#77808f', fontSize: 11.5, lineHeight: 16, marginTop: 2 },
-  toggleValue: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  bold: { fontWeight: '800', color: '#fff' },
-
-  warnRow: { marginTop: 14, backgroundColor: '#3a2222', borderRadius: 10, padding: 10 },
-  warnText: { color: '#f0b8ae', fontSize: 13, lineHeight: 18 },
-
-  testBtn: { marginTop: 16, backgroundColor: '#232c3d', borderRadius: 10, paddingVertical: 11, alignItems: 'center' },
-  testBtnText: { color: '#cfe0f5', fontSize: 14, fontWeight: '700' },
-
-  mutedWrap: { marginTop: 14, borderTopWidth: 1, borderTopColor: '#242e42', paddingTop: 6 },
-  mutedRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 },
-
-  sourceLine: { color: '#c6ccd8', fontSize: 13, lineHeight: 22 },
-
-  warningRow: { flexDirection: 'row', alignItems: 'flex-start', marginTop: 10 },
-  warnPill: { borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3, marginRight: 10, marginTop: 1 },
-  warnPillText: { color: '#101418', fontSize: 10.5, fontWeight: '900' },
-  warningTextWrap: { flex: 1 },
-  warnMeta: { color: '#77808f', fontSize: 12, marginTop: 2 },
-  namedStorm: { fontWeight: '700', color: '#8fc3ff', marginBottom: 4 },
-
-  townInput: {
-    marginTop: 12,
-    backgroundColor: '#232c3d',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: '#fff',
-    fontSize: 15,
+  brand: { color: C.text, fontSize: 22, fontWeight: '800', letterSpacing: 0.2 },
+  addBtn: {
+    backgroundColor: C.accent,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 999,
   },
-  townRow: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#242e42' },
-  changeLink: { color: '#7db4ff', fontSize: 13, fontWeight: '600' },
+  addBtnText: { color: C.accentInk, fontWeight: '700', fontSize: 14 },
+  closeBtn: { paddingHorizontal: 6, paddingVertical: 8 },
+  closeText: { color: C.dim, fontSize: 15, fontWeight: '600' },
+  scroll: { paddingHorizontal: 16, paddingBottom: 40 },
+  periodBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingBottom: 12,
+    paddingTop: 2,
+  },
+  arrow: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    backgroundColor: C.card,
+  },
+  arrowText: { color: C.text, fontSize: 24, fontWeight: '600', lineHeight: 28 },
+  periodLabel: { color: C.text, fontSize: 16, fontWeight: '700', textAlign: 'center' },
+  periodSub: { color: C.faint, fontSize: 12.5, textAlign: 'center', marginTop: 2 },
+  headlineLabel: { color: C.dim, fontSize: 13, fontWeight: '600' },
+  headline: {
+    color: C.accent,
+    fontSize: 42,
+    fontWeight: '800',
+    marginTop: 4,
+    fontVariant: ['tabular-nums'],
+  },
+  headlineRow: { flexDirection: 'row', marginTop: 14, gap: 10 },
+  headlineStat: { flex: 1 },
+  headlineStatValue: { color: C.text, fontSize: 16, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  headlineStatLabel: { color: C.faint, fontSize: 12, marginTop: 2 },
+  emptyTitle: { color: C.text, fontSize: 16, fontWeight: '700', marginBottom: 6 },
+  emptyBody: { color: C.dim, fontSize: 14, lineHeight: 20 },
+  shiftRow: { flexDirection: 'row', alignItems: 'center', padding: 14, gap: 12 },
+  jobStripe: { width: 4, alignSelf: 'stretch', borderRadius: 2 },
+  shiftTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  shiftDate: { color: C.text, fontSize: 15.5, fontWeight: '700' },
+  shiftJob: { fontSize: 12.5, fontWeight: '600' },
+  shiftTimes: { color: C.dim, fontSize: 13.5, marginTop: 3 },
+  shiftPay: { color: C.text, fontSize: 17, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  shiftHours: { color: C.faint, fontSize: 12.5, marginTop: 2 },
+  shiftDetail: {
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: C.line,
+    paddingTop: 10,
+  },
+  detailHead: { color: C.dim, fontSize: 13, fontWeight: '600', marginBottom: 4 },
+  detailButtons: { flexDirection: 'row', gap: 8, marginTop: 14 },
+  note: { color: C.dim, fontSize: 14, fontStyle: 'italic', marginTop: 10 },
+  settingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, gap: 12 },
+  rowLabel: { color: C.text, fontSize: 15, flexShrink: 1 },
+  rowHint: { color: C.faint, fontSize: 12.5, marginTop: 3, lineHeight: 17 },
+  jobHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  jobDot: { width: 12, height: 12, borderRadius: 6 },
+  dateRow: { flexDirection: 'row', alignItems: 'center' },
+  dateBig: { color: C.text, fontSize: 18, fontWeight: '700' },
+  previewPay: { color: C.accent, fontSize: 30, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  footnote: { color: C.faint, fontSize: 12, lineHeight: 18, marginTop: 12, marginBottom: 4 },
+  pre: {
+    color: C.dim,
+    fontSize: 12,
+    lineHeight: 17,
+    marginVertical: 10,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  tabBar: {
+    flexDirection: 'row',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: C.line,
+    backgroundColor: C.bg,
+    paddingTop: 8,
+    paddingBottom: Platform.OS === 'ios' ? 4 : 10,
+  },
+  tab: { flex: 1, alignItems: 'center', paddingVertical: 4, gap: 5 },
+  tabText: { color: C.faint, fontSize: 13.5, fontWeight: '600' },
+  tabTextActive: { color: C.text, fontWeight: '700' },
+  tabDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: 'transparent' },
 });
