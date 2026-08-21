@@ -6,3 +6,9 @@ web-build/
 .DS_Store
 ios/
 android/
+AuthKey*.p8
+*.p12
+*.mobileprovision
+*.cer
+*.certSigningRequest
+credentials.json
