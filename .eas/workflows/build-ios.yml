@@ -1,11 +1,14 @@
-# Builds the installable iOS app on EAS whenever main changes.
-# Runs on Expo's servers via the GitHub integration — watch it at
-# expo.dev → eclipse-lookout → Builds. The widget extension is signed
-# automatically (it's registered under extra.eas.build.experimental).
+# Full iOS build (app + widget extension). Runs on demand only — kick it off
+# from expo.dev (Builds → Build from GitHub → main / iOS / production).
+#
+# Auto-build-on-merge is intentionally off: building needs the one-time
+# Apple credentials sign-off first, and until that's done every automatic
+# run could only fail. To turn auto-builds back on after credentials exist,
+# restore:
+#   on:
+#     push:
+#       branches: ['main']
 name: Build iOS app
-on:
-  push:
-    branches: ['main']
 jobs:
   build_ios:
     name: Build iOS
