@@ -70,6 +70,18 @@ export function buildWidgetPayload(picture, now = new Date()) {
     payload.bandColor = '#4b8f6f';
   }
 
+  const warning = picture?.warnings?.top;
+  if (warning) {
+    payload.warnLevel = warning.level;
+    payload.warnType = warning.type;
+    payload.warnColor = warning.color;
+  }
+  if (picture?.warnings?.stormName) payload.namedStorm = picture.warnings.stormName;
+  const floods = picture?.floods?.counts;
+  if (floods && (floods.severe || floods.warning)) {
+    payload.floodCount = floods.severe + floods.warning;
+  }
+
   if (wind?.peak) {
     payload.gustMph = Math.round(wind.peak.gustMph);
     payload.gustDay = fmtDayLabel(wind.peak.date);

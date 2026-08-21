@@ -26,6 +26,20 @@ to the question that actually matters here — **is any of it coming for us?**
   locations from the Open-Meteo global model. This is where an ex-hurricane
   actually shows up for us: once a storm is being dragged across the Atlantic,
   the models put the wind into this chart days before it arrives.
+- **Official UK weather warnings** — the Met Office's live yellow/amber/red
+  warnings (via MeteoAlarm's keyless feed), including the storm's name when
+  one is named ("Storm Floris"). Red and amber warnings take over the top
+  banner and arrive as time-sensitive notifications.
+- **Risk for my location** — pick your town (no GPS permission needed; ~100
+  UK & Irish towns bundled) and the app shows how close each storm's track
+  passes to *you*, when, and your own 16-day gust outlook.
+- **Flood warnings** — live Environment Agency flood alerts and warnings
+  (England only — Wales and Scotland publish separately), with severe flood
+  warnings as urgent notifications.
+- **Season context** — how many systems this season has produced versus the
+  1991–2020 average for the date, days to the 10 September climatological
+  peak, a running log of every storm the app has tracked this season, and
+  the ex-hurricanes that actually reached the UK before.
 - **Alerts** — notifications when a storm's UK risk reaches your chosen level
   (Watch / Elevated / High), when a new named storm forms or an area is likely
   to develop, and when gales appear in the UK forecast. Storms at Elevated or
@@ -76,6 +90,8 @@ on the App ID as part of the build. Widgets never appear in Expo Go.
 | NHC Forecast/Advisory (TCM) | Official forecast track to 5 days | One text product per storm, parsed in-app |
 | [NHC Tropical Weather Outlook](https://www.nhc.noaa.gov/gtwo.php?basin=atlc&fdays=7) | 2-day / 7-day formation chances | `TWOAT.xml` |
 | [Open-Meteo](https://open-meteo.com/) | 16-day UK wind and gust forecast | Free, no API key |
+| [MeteoAlarm](https://meteoalarm.org/) | Official Met Office weather warnings | Keyless ATOM feed |
+| [Environment Agency](https://environment.data.gov.uk/flood-monitoring/doc/reference) | Live flood warnings | England only, keyless |
 
 Honest limitations, shown in-app too:
 

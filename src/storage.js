@@ -14,6 +14,12 @@ export const DEFAULT_SETTINGS = {
   formationAlerts: true,
   // Alert when the UK 16-day forecast picks up a gale/storm-force day.
   windAlerts: true,
+  // Alert on new amber/red official weather warnings.
+  warningAlerts: true,
+  // Alert on new severe flood warnings / flood warnings (England).
+  floodAlerts: true,
+  // Chosen "my location" town ({name, lat, lon}) or null for UK-wide only.
+  place: null,
   // Hold non-urgent alerts overnight (23:00–07:00). A storm at High risk
   // still comes through — that's the whole point of the app.
   quietHours: true,

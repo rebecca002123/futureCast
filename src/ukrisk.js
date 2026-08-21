@@ -305,3 +305,16 @@ export function outlookWatchLevel(area) {
   if (chance >= 20) return { label: 'Low chance of forming', color: '#d4a72c' };
   return { label: 'Very low chance', color: '#4b8f6f' };
 }
+
+// Closest approach of a storm's combined path to one specific point — the
+// "risk for my location" view. Returns distance, when, and whether that
+// moment is on the official forecast or the app's extrapolation.
+export function closestToPlace(risk, place) {
+  if (!place || !risk?.path?.length) return null;
+  let best = null;
+  for (const p of risk.path) {
+    const miles = haversineMiles(p.lat, p.lon, place.lat, place.lon);
+    if (!best || miles < best.miles) best = { miles, point: p };
+  }
+  return best;
+}

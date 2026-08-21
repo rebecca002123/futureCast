@@ -8,6 +8,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
@@ -26,6 +27,16 @@ import {
   timeAgoLabel,
 } from './src/storms';
 import { outlookWatchLevel, UK_CENTRE } from './src/ukrisk';
+import { searchTowns } from './src/places';
+import {
+  climatologyToDate,
+  daysToPeak,
+  HISTORIC_UK_STORMS,
+  loadSeasonLog,
+  seasonActivityLabel,
+  seasonStormNumber,
+  updateSeasonLog,
+} from './src/season';
 import { WINDSTORM_GUST_MPH } from './src/ukwind';
 import { evaluateAlerts, fetchStormPicture, inQuietHours, summarise } from './src/watch';
 import {
@@ -83,6 +94,9 @@ export default function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [expanded, setExpanded] = useState({});
   const [muted, setMuted] = useState({});
+  const [townQuery, setTownQuery] = useState('');
+  const [seasonLog, setSeasonLog] = useState({});
+  const [showHistory, setShowHistory] = useState(false);
   const [permission, setPermission] = useState(null);
   const [testSent, setTestSent] = useState(false);
   const [now, setNow] = useState(new Date());
@@ -97,10 +111,16 @@ export default function App() {
   const refresh = useCallback(async (isManual = false) => {
     if (isManual) setRefreshing(true);
     try {
-      const next = await fetchStormPicture();
+      const next = await fetchStormPicture(20000, settingsRef.current.place || null);
       setPicture(next);
       pictureRef.current = next;
       lastFetchRef.current = Date.now();
+      if (next.stormsOk) {
+        loadSeasonLog()
+          .then((log) => updateSeasonLog(log, next.assessed))
+          .then(setSeasonLog)
+          .catch(() => {});
+      }
 
       if (next.stormsOk || next.wind) {
         saveSnapshot(snapshotOf(next));
@@ -138,6 +158,7 @@ export default function App() {
       mutedRef.current = mutedMap;
       setMuted(mutedMap);
       setSnapshot(snap);
+      loadSeasonLog().then(setSeasonLog).catch(() => {});
       await setupAndroidChannel();
       await setupNotificationCategories();
       if (s.notificationsEnabled) await ensureNotificationPermission();
@@ -224,6 +245,15 @@ export default function App() {
           : "Couldn't reach the National Hurricane Center. Check your connection and pull down to retry.",
       };
     }
+    const warn = summary.topWarning;
+    if (warn && warn.rank >= 3) {
+      return {
+        color: '#8c1d1d',
+        icon: '🔴',
+        title: `RED ${warn.type.toLowerCase()} warning${summary.stormName ? ` — Storm ${summary.stormName}` : ''}`,
+        body: `The Met Office has a red warning for ${warn.area}. Dangerous conditions expected — follow official advice.`,
+      };
+    }
     const top = summary.top;
     if (top && top.risk.score >= 60) {
       return {
@@ -243,6 +273,14 @@ export default function App() {
         body:
           `Recurving towards the north-east Atlantic — closest approach about ${Math.round(top.risk.closest.miles)} miles ` +
           `from ${top.risk.closest.place} ${leadTimeLabel(top.risk.closest.point.time, now)}. ${confidenceSentence(top.risk)}`,
+      };
+    }
+    if (warn && warn.rank >= 2) {
+      return {
+        color: '#8a3d16',
+        icon: '⚠️',
+        title: `Amber ${warn.type.toLowerCase()} warning${summary.stormName ? ` — Storm ${summary.stormName}` : ''}`,
+        body: `In force for ${warn.area}. ${assessed.length ? 'Storm details below.' : 'Check the Met Office for timing and impacts.'}`,
       };
     }
     if (wind?.stormyDays?.length) {
@@ -360,6 +398,49 @@ export default function App() {
           />
         </View>
 
+        <Text style={styles.sectionTitle}>Official UK weather warnings</Text>
+        {picture?.warnings ? (
+          picture.warnings.warnings.length ? (
+            <View style={styles.card}>
+              {summary.stormName ? (
+                <Text style={[styles.cardBody, styles.namedStorm]}>
+                  🌀 The Met Office has named this storm: Storm {summary.stormName}
+                </Text>
+              ) : null}
+              {picture.warnings.warnings.slice(0, 8).map((w) => (
+                <View key={w.id} style={styles.warningRow}>
+                  <View style={[styles.warnPill, { backgroundColor: w.color }]}>
+                    <Text style={styles.warnPillText}>{w.level.toUpperCase()}</Text>
+                  </View>
+                  <View style={styles.warningTextWrap}>
+                    <Text style={styles.cardBody}>
+                      {w.icon} {w.type} — {w.area}
+                    </Text>
+                    <Text style={styles.warnMeta}>
+                      {w.active ? 'In force now' : w.onset ? `From ${fmtDayLabel(w.onset)}` : ''}
+                      {w.expires ? ` until ${fmtDayLabel(w.expires)}` : ''}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+              <Pressable onPress={() => Linking.openURL('https://www.metoffice.gov.uk/weather/warnings-and-advice/uk-warnings')}>
+                <Text style={styles.linkBtnText}>Full details on the Met Office site ↗</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View style={styles.card}>
+              <Text style={styles.cardBody}>✅ No weather warnings in force for the UK right now.</Text>
+              <Text style={styles.smallNote}>
+                Live from MeteoAlarm, which republishes the Met Office's yellow/amber/red warnings.
+              </Text>
+            </View>
+          )
+        ) : (
+          <View style={styles.card}>
+            <Text style={styles.cardBody}>Warnings feed unavailable — pull down to retry.</Text>
+          </View>
+        )}
+
         <Text style={styles.sectionTitle}>
           {assessed.length ? 'Active Atlantic storms' : loading && !picture ? 'Loading storms…' : 'Active Atlantic storms'}
         </Text>
@@ -382,6 +463,78 @@ export default function App() {
             onToggle={() => setExpanded((p) => ({ ...p, [storm.id]: !p[storm.id] }))}
           />
         ))}
+
+        <Text style={styles.sectionTitle}>Risk for my location</Text>
+        <View style={styles.card}>
+          {settings.place ? (
+            <>
+              <View style={styles.cardHeaderRow}>
+                <Text style={styles.cardTitle}>📍 {settings.place.name}</Text>
+                <Pressable onPress={() => updateSettings({ place: null })}>
+                  <Text style={styles.changeLink}>Change</Text>
+                </Pressable>
+              </View>
+              {picture?.local?.storms?.length ? (
+                picture.local.storms.slice(0, 2).map(({ storm, closest }) => (
+                  <Text key={storm.id} style={styles.cardBody}>
+                    🌀 {storm.name}: track passes ~{Math.round(closest.miles).toLocaleString()} miles from you
+                    {closest.point?.time ? ` ${leadTimeLabel(closest.point.time, now)}` : ''}
+                    {closest.point?.extrapolated ? ' (extrapolated)' : ' (NHC forecast)'}
+                  </Text>
+                ))
+              ) : (
+                <Text style={styles.cardBody}>
+                  {assessed.length
+                    ? 'No storm track currently passes anywhere near you.'
+                    : 'No active storms to measure from.'}
+                </Text>
+              )}
+              {picture?.local?.wind?.peak ? (
+                <Text style={[styles.cardBody, { marginTop: 8 }]}>
+                  💨 Windiest day for you: {Math.round(picture.local.wind.peak.gustMph)} mph gusts on{' '}
+                  {fmtDayLabel(picture.local.wind.peak.date)}
+                  {picture.local.wind.stormyDays.length
+                    ? ` · ${picture.local.wind.stormyDays.length} gale-force day${picture.local.wind.stormyDays.length > 1 ? 's' : ''} in the next 16`
+                    : ' — nothing gale-force in the next 16 days'}
+                </Text>
+              ) : null}
+              <Text style={styles.smallNote}>
+                Distances are to your town from each storm's forecast track; wind is the 16-day Open-Meteo forecast for
+                your coordinates.
+              </Text>
+            </>
+          ) : (
+            <>
+              <Text style={styles.cardBody}>
+                Pick your town to see how close each storm's track comes to you and your own 16-day wind outlook.
+              </Text>
+              <TextInput
+                style={styles.townInput}
+                placeholder="Start typing your town…"
+                placeholderTextColor="#63708a"
+                value={townQuery}
+                onChangeText={setTownQuery}
+                autoCorrect={false}
+              />
+              {searchTowns(townQuery).map((town) => (
+                <Pressable
+                  key={town.name}
+                  style={styles.townRow}
+                  onPress={() => {
+                    updateSettings({ place: town });
+                    setTownQuery('');
+                    refresh();
+                  }}
+                >
+                  <Text style={styles.cardBody}>📍 {town.name}</Text>
+                </Pressable>
+              ))}
+              <Text style={styles.smallNote}>
+                Stored only on your phone. No GPS permission needed — and you can change it any time.
+              </Text>
+            </>
+          )}
+        </View>
 
         <Text style={styles.sectionTitle}>Formation watch (next 7 days)</Text>
         {areas.length === 0 ? (
@@ -441,6 +594,81 @@ export default function App() {
           </View>
         )}
 
+        <Text style={styles.sectionTitle}>Flood warnings (England)</Text>
+        {picture?.floods ? (
+          picture.floods.floods.length ? (
+            <View style={styles.card}>
+              <Text style={styles.cardBody}>
+                {picture.floods.counts.severe ? `🚨 ${picture.floods.counts.severe} severe · ` : ''}
+                {picture.floods.counts.warning} warning{picture.floods.counts.warning === 1 ? '' : 's'} ·{' '}
+                {picture.floods.counts.alert} alert{picture.floods.counts.alert === 1 ? '' : 's'}
+              </Text>
+              {picture.floods.floods.slice(0, 6).map((f) => (
+                <View key={f.id} style={styles.warningRow}>
+                  <View style={[styles.warnPill, { backgroundColor: f.color }]}>
+                    <Text style={styles.warnPillText}>{f.short.toUpperCase()}</Text>
+                  </View>
+                  <View style={styles.warningTextWrap}>
+                    <Text style={styles.cardBody}>{f.area}</Text>
+                    {f.region ? <Text style={styles.warnMeta}>{f.region}</Text> : null}
+                  </View>
+                </View>
+              ))}
+              {picture.floods.floods.length > 6 ? (
+                <Text style={styles.smallNote}>…and {picture.floods.floods.length - 6} more.</Text>
+              ) : null}
+              <Pressable onPress={() => Linking.openURL('https://check-for-flooding.service.gov.uk/')}>
+                <Text style={styles.linkBtnText}>Check your area on gov.uk ↗</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View style={styles.card}>
+              <Text style={styles.cardBody}>✅ No flood alerts or warnings in force in England.</Text>
+              <Text style={styles.smallNote}>
+                Live from the Environment Agency (England only — Wales and Scotland publish theirs separately at
+                Natural Resources Wales and SEPA).
+              </Text>
+            </View>
+          )
+        ) : (
+          <View style={styles.card}>
+            <Text style={styles.cardBody}>Flood feed unavailable — pull down to retry.</Text>
+          </View>
+        )}
+
+        <Text style={styles.sectionTitle}>This hurricane season</Text>
+        <View style={styles.card}>
+          <SeasonStats assessed={assessed} seasonLog={seasonLog} now={now} />
+          {Object.keys(seasonLog).length ? (
+            <>
+              <Text style={styles.detailHeading}>Systems tracked this season</Text>
+              {Object.entries(seasonLog)
+                .sort((a, b) => b[1].lastSeen - a[1].lastSeen)
+                .slice(0, 8)
+                .map(([id, entry]) => (
+                  <Text key={id} style={styles.detailLine}>
+                    🌀 {entry.name} — peaked {Math.round(ktToMph(entry.maxWindKt))} mph
+                    {isFinite(entry.minUKMiles)
+                      ? ` · track came within ${Math.round(entry.minUKMiles).toLocaleString()} mi of the UK`
+                      : ''}
+                  </Text>
+                ))}
+            </>
+          ) : null}
+          <Pressable onPress={() => setShowHistory((v) => !v)}>
+            <Text style={styles.linkBtnText}>
+              {showHistory ? 'Hide' : 'Show'} ex-hurricanes that reached the UK {showHistory ? '▴' : '▾'}
+            </Text>
+          </Pressable>
+          {showHistory
+            ? HISTORIC_UK_STORMS.map((h) => (
+                <Text key={`${h.year}-${h.name}`} style={styles.detailLine}>
+                  <Text style={styles.bold}>{h.name} ({h.year})</Text> — {h.note}
+                </Text>
+              ))
+            : null}
+        </View>
+
         <Text style={styles.sectionTitle}>Alerts</Text>
         <View style={styles.card}>
           <Text style={styles.cardBody}>Notify me when a storm's UK risk reaches:</Text>
@@ -469,6 +697,16 @@ export default function App() {
             label="UK gale-force wind alerts"
             value={settings.windAlerts}
             onPress={() => updateSettings({ windAlerts: !settings.windAlerts })}
+          />
+          <Toggle
+            label="Amber/red weather warnings"
+            value={settings.warningAlerts !== false}
+            onPress={() => updateSettings({ warningAlerts: settings.warningAlerts === false })}
+          />
+          <Toggle
+            label="Flood warnings (England)"
+            value={settings.floodAlerts !== false}
+            onPress={() => updateSettings({ floodAlerts: settings.floodAlerts === false })}
           />
           <Toggle
             label="Quiet overnight"
@@ -567,6 +805,8 @@ export default function App() {
           />
           <SourceLine ok={areas.length > 0 || !!picture?.outlook?.body} label="NHC tropical weather outlook — formation chances" />
           <SourceLine ok={!!wind} label="Open-Meteo — 16-day UK wind and gust forecast" />
+          <SourceLine ok={!!picture?.warnings} label="MeteoAlarm — official Met Office weather warnings" />
+          <SourceLine ok={!!picture?.floods} label="Environment Agency — live flood warnings (England)" />
           {picture?.errors?.length ? (
             <Text style={styles.smallNote}>Last refresh issues: {picture.errors.slice(0, 3).join(' · ')}</Text>
           ) : null}
@@ -718,6 +958,36 @@ function ChanceBar({ label, value }) {
   );
 }
 
+function SeasonStats({ assessed, seasonLog, now }) {
+  const count = seasonStormNumber(assessed, seasonLog);
+  const avg = climatologyToDate(now);
+  const activity = seasonActivityLabel(count, avg);
+  const toPeak = daysToPeak(now);
+  return (
+    <>
+      <View style={styles.cardHeaderRow}>
+        <Text style={styles.cardTitle}>
+          {count} system{count === 1 ? '' : 's'} so far · normal for the date is ~{avg.toFixed(1)}
+        </Text>
+        <View style={[styles.ratingPill, { backgroundColor: activity.color }]}>
+          <Text style={styles.ratingText}>{activity.label}</Text>
+        </View>
+      </View>
+      <Text style={styles.cardBody}>
+        {toPeak > 0
+          ? `The climatological peak of the season is 10 September — ${toPeak} days away, so the busiest stretch is still to come.`
+          : toPeak > -30
+          ? 'We are right around the September peak of the season — the busiest few weeks of the year.'
+          : 'Past the September peak — activity normally winds down from here.'}
+      </Text>
+      <Text style={styles.smallNote}>
+        System count is inferred from NHC storm numbering (it includes depressions, so it can run slightly ahead of the
+        named-storm count). Climatology is the 1991–2020 average.
+      </Text>
+    </>
+  );
+}
+
 function Toggle({ label, value, onPress, hint }) {
   return (
     <Pressable style={styles.toggleRow} onPress={onPress}>
@@ -849,4 +1119,23 @@ const styles = StyleSheet.create({
   mutedRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 },
 
   sourceLine: { color: '#c6ccd8', fontSize: 13, lineHeight: 22 },
+
+  warningRow: { flexDirection: 'row', alignItems: 'flex-start', marginTop: 10 },
+  warnPill: { borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3, marginRight: 10, marginTop: 1 },
+  warnPillText: { color: '#101418', fontSize: 10.5, fontWeight: '900' },
+  warningTextWrap: { flex: 1 },
+  warnMeta: { color: '#77808f', fontSize: 12, marginTop: 2 },
+  namedStorm: { fontWeight: '700', color: '#8fc3ff', marginBottom: 4 },
+
+  townInput: {
+    marginTop: 12,
+    backgroundColor: '#232c3d',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#fff',
+    fontSize: 15,
+  },
+  townRow: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#242e42' },
+  changeLink: { color: '#7db4ff', fontSize: 13, fontWeight: '600' },
 });

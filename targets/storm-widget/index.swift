@@ -37,6 +37,12 @@ struct StormSnapshot: Codable {
     var gustPlace: String?
     var stormyDayCount: Int?
 
+    var warnLevel: String?
+    var warnType: String?
+    var warnColor: String?
+    var namedStorm: String?
+    var floodCount: Int?
+
     static let placeholder = StormSnapshot(
         updatedAt: Date().timeIntervalSince1970,
         stormCount: 2,
@@ -98,6 +104,11 @@ struct StormSnapshot: Codable {
     var windLine: String? {
         guard let gust = gustMph, let day = gustDay else { return nil }
         return "UK gusts \(gust) mph · \(day)"
+    }
+
+    var warningLine: String? {
+        guard let level = warnLevel, let type = warnType else { return nil }
+        return "\(level) \(type.lowercased()) warning"
     }
 
     var tint: Color {
@@ -271,7 +282,13 @@ struct MediumStormView: View {
                         subtitle: s.gustPlace.map { "\(day) · \($0)" } ?? day
                     )
                 }
-                if let forming = s.formingCount, forming > 0 {
+                if let warn = s.warningLine {
+                    StatRow(
+                        icon: "exclamationmark.triangle",
+                        title: warn,
+                        subtitle: s.namedStorm.map { "Storm \($0)" }
+                    )
+                } else if let forming = s.formingCount, forming > 0 {
                     StatRow(
                         icon: "eye",
                         title: "\(forming) area\(forming == 1 ? "" : "s") may develop",
